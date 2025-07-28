@@ -22,7 +22,19 @@ type giteaClient struct {
 	client *gitea.Client
 }
 
-var _ Client = &giteaClient{}
+func (c *giteaClient) ListDir(_ *context.Context, _ Repo, _ string) ([]string, error) {
+	return nil, ErrNotImplemented
+}
+
+func (c *giteaClient) DeleteFile(_ *context.Context, _ config.CommitAuthor, _ Repo, _ string, _ string) error {
+	return ErrNotImplemented
+}
+
+var (
+	_ Client          = &giteaClient{}
+	_ DirectoryLister = &giteaClient{}
+	_ FileDeleter     = &giteaClient{}
+)
 
 func getInstanceURL(ctx *context.Context) (string, error) {
 	apiURL, err := tmpl.New(ctx).Apply(ctx.Config.GiteaURLs.API)

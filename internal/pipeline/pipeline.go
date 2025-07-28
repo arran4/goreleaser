@@ -20,6 +20,7 @@ import (
 	"github.com/goreleaser/goreleaser/v2/internal/pipe/docker"
 	"github.com/goreleaser/goreleaser/v2/internal/pipe/effectiveconfig"
 	"github.com/goreleaser/goreleaser/v2/internal/pipe/env"
+	"github.com/goreleaser/goreleaser/v2/internal/pipe/gentoo"
 	"github.com/goreleaser/goreleaser/v2/internal/pipe/git"
 	"github.com/goreleaser/goreleaser/v2/internal/pipe/gomod"
 	"github.com/goreleaser/goreleaser/v2/internal/pipe/ko"
@@ -147,6 +148,8 @@ var Pipeline = append(
 	krew.Pipe{},
 	// create scoop buckets
 	scoop.Pipe{},
+	// create gentoo ebuilds
+	gentoo.Pipe{},
 	// create chocolatey pkg and publish
 	chocolatey.Pipe{},
 	// reports artifacts sizes to the log and to artifacts.json

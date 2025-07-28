@@ -24,6 +24,8 @@ const DefaultGitLabDownloadURL = "https://gitlab.com"
 var (
 	_ Client            = &gitlabClient{}
 	_ PullRequestOpener = &gitlabClient{}
+	_ DirectoryLister   = &gitlabClient{}
+	_ FileDeleter       = &gitlabClient{}
 )
 
 type gitlabClient struct {
@@ -31,6 +33,14 @@ type gitlabClient struct {
 	authType gitlab.AuthType
 
 	isV17OrLater bool
+}
+
+func (c *gitlabClient) ListDir(_ *context.Context, _ Repo, _ string) ([]string, error) {
+	return nil, ErrNotImplemented
+}
+
+func (c *gitlabClient) DeleteFile(_ *context.Context, _ config.CommitAuthor, _ Repo, _ string, _ string) error {
+	return ErrNotImplemented
 }
 
 // newGitLab returns a gitlab client implementation.

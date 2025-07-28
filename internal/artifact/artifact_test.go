@@ -1066,6 +1066,8 @@ func TestArtifactTypeIsUploadable(t *testing.T) {
 		UniversalBinary,
 		DockerImage,
 		Snapcraft,
+		GentooEbuild,
+		GentooFile,
 	}
 	for i := range lastMarker - 1 {
 		up := i.isUploadable()
