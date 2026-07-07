@@ -300,15 +300,8 @@ func (Pipe) Publish(ctx *context.Context) error {
 			return err
 		}
 
-		var lister client.DirectoryLister
-		if g.cfg.Repository.Git.URL != "" {
-			lister, _ = client.NewGitUploadClient(repo.Branch).(client.DirectoryLister)
-		} else {
-			lister, _ = cl.(client.DirectoryLister)
-		}
-
 		// list existing ebuilds
-		if lister != nil && g.cfg.KeepVersions > 0 {
+		if lister, ok := cl.(client.DirectoryLister); ok && g.cfg.KeepVersions > 0 {
 			dir := filepath.Dir(g.cfg.Path)
 			names, err := lister.ListDir(ctx, repo, dir)
 			if err == nil {
@@ -338,8 +331,7 @@ func (Pipe) Publish(ctx *context.Context) error {
 		}
 
 		if g.cfg.Repository.Git.URL != "" {
-			fc := cl.(client.FilesCreator)
-			if err := fc.CreateFiles(ctx, author, repo, msg, g.files); err != nil {
+			if err := client.NewGitUploadClient(repo.Branch).CreateFiles(ctx, author, repo, msg, g.files); err != nil {
 				return err
 			}
 		} else if fc, ok := cl.(client.FilesCreator); ok {
