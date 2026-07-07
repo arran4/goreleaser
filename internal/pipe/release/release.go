@@ -98,7 +98,7 @@ func getRepository(ctx *context.Context) (config.Repo, error) {
 
 // Publish the release.
 func (Pipe) Publish(ctx *context.Context) error {
-	c, err := releaseClient(ctx)
+	c, err := client.New(ctx)
 	if err != nil {
 		return err
 	}
@@ -110,13 +110,6 @@ func (Pipe) Publish(ctx *context.Context) error {
 			Info("release published")
 	}
 	return nil
-}
-
-// releaseClient creates the SCM client for the release, honoring a custom token
-// set on the release repository, if any.
-func releaseClient(ctx *context.Context) (client.Client, error) {
-	repo := releaseRepo(ctx)
-	return client.NewIfToken(ctx, nil, repo.Token)
 }
 
 func releaseRepo(ctx *context.Context) config.Repo {

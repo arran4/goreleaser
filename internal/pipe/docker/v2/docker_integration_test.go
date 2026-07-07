@@ -8,6 +8,7 @@ import (
 	"slices"
 	"testing"
 
+	api "github.com/docker/docker/api/types/image"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/goreleaser/goreleaser/v2/internal/artifact"
 	"github.com/goreleaser/goreleaser/v2/internal/gerrors"
@@ -395,15 +396,7 @@ func rmi(tb testing.TB, img string) {
 	require.NoError(tb, exec.CommandContext(tb.Context(), "docker", "rmi", "--force", img).Run())
 }
 
-// inspectResponse is the minimal subset of the docker image inspect response
-// used by these tests.
-type inspectResponse struct {
-	Config struct {
-		Labels map[string]string
-	}
-}
-
-func inspectImage(tb testing.TB, image string) []inspectResponse {
+func inspectImage(tb testing.TB, image string) []api.InspectResponse {
 	tb.Helper()
 	out, err := exec.CommandContext(
 		tb.Context(),
@@ -413,7 +406,7 @@ func inspectImage(tb testing.TB, image string) []inspectResponse {
 	).CombinedOutput()
 	require.NoError(tb, err, "output: %s", string(out))
 
-	var t []inspectResponse
+	var t []api.InspectResponse
 	require.NoError(tb, json.Unmarshal(out, &t))
 	return t
 }

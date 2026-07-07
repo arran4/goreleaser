@@ -3,7 +3,6 @@ package gentoo
 import (
 	"os"
 	"path/filepath"
-	ctx_pkg "context"
 	"testing"
 
 	"github.com/goreleaser/goreleaser/v2/internal/artifact"
@@ -15,7 +14,7 @@ import (
 
 func TestDoRunMultiArch(t *testing.T) {
 	dist := t.TempDir()
-	ctx := testctx.WrapWithCfg(ctx_pkg.Background(), config.Project{
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
 		Dist:        dist,
 		ProjectName: "foo",
 		Gentoos: []config.Gentoo{{
@@ -54,17 +53,17 @@ func TestDoRunMultiArch(t *testing.T) {
 
 func TestDoRunWithFiles(t *testing.T) {
 	dist := t.TempDir()
-	svc := filepath.Join(dist, "foo.service")
+	svc := "foo.service"
 	require.NoError(t, os.WriteFile(svc, []byte("svc"), 0o644))
 
-	ctx := testctx.WrapWithCfg(ctx_pkg.Background(), config.Project{
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
 		Dist:        dist,
 		ProjectName: "foo",
 		Gentoos: []config.Gentoo{{
 			Repository: config.RepoRef{Name: "overlay"},
 			Bin:        true,
 			Files: []config.ExtraFile{{
-				Glob:         svc,
+				Glob:         "./foo.service",
 				NameTemplate: "files/foo.service",
 			}},
 		}},
@@ -84,10 +83,11 @@ func TestDoRunWithFiles(t *testing.T) {
 
 	target := filepath.Join(dist, "gentoo", "app-misc", "foo-bin", "files", "foo.service")
 	_, err := os.Stat(target)
+	os.Remove(svc)
 	require.NoError(t, err)
 }
 
 func TestDefaultRequiresBin(t *testing.T) {
-	ctx := testctx.WrapWithCfg(ctx_pkg.Background(), config.Project{Gentoos: []config.Gentoo{{}}}, testctx.WithVersion("1.0.0"))
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{Gentoos: []config.Gentoo{{}}}, testctx.WithVersion("1.0.0"))
 	require.Error(t, Pipe{}.Default(ctx))
 }

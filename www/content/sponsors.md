@@ -40,19 +40,6 @@ These are the companies and individuals that help make GoReleaser happen:
     <div class="goreleaser-sponsors-tier-label">Gold</div>
     <div class="goreleaser-sponsors-grid">
         <a class="goreleaser-sponsor-item" 
-          href="https://resources.github.com/github-secure-open-source-fund/?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github" 
-          target="_blank" 
-          rel="noopener sponsored"
-        >
-          <img 
-            src="https://avatars.githubusercontent.com/u/199005812?s=96&v=4" 
-            alt="GitHub SecureOSS Fund " 
-            width="96" 
-            height="96"
-          />
-          GitHub SecureOSS Fund 
-        </a>
-        <a class="goreleaser-sponsor-item" 
           href="https://nitric.io?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github" 
           target="_blank" 
           rel="noopener sponsored"
@@ -159,7 +146,6 @@ These are the companies and individuals that help make GoReleaser happen:
 
 ### Backers
 
-- [Dharsan Baskar](https://github.com/dharsanb?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
 - [Chatpong Voranartaksorn](https://github.com/psychv/?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
 - [Automatio AI](https://automatio.ai/?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=opencollective)
 - [Bruno P](https://brunopaz.dev/?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=opencollective)
@@ -172,7 +158,6 @@ These are the companies and individuals that help make GoReleaser happen:
 - [Time.so](https://time.so/?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=opencollective)
 - [Video Downloader](https://orbitdownloader.com/?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=opencollective)
 - [YouTube Transcript](https://transcript.you/?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=opencollective)
-- [Quesma](https://quesma.com?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
 - [Alexey Palazhchenko](https://about.me/alexey.palazhchenko?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
 - [Ben Lechlitner](https://asphaltbuffet.com?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
 - [Christopher Butler](https://github.com/techsaint?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
@@ -183,7 +168,6 @@ These are the companies and individuals that help make GoReleaser happen:
 - [Nicolas Gotchac](https://github.com/ngotchac?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
 - [Ryan Nixon](https://www.ryannixon.com?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
 - [Weston Schmidt](http://comcast.com?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
-- [Santosh Yadav](https://Santoshyadav.dev?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
 - [David Birks](https://github.com/dbirks?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
 - [Benjamin Kane](https://www.bbkane.com/?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
 - [Carl Tsai](https://github.com/moonape1226?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
@@ -198,9 +182,8 @@ These are the companies and individuals that help make GoReleaser happen:
 - [Kazuma Watanabe](https://sil.hatenablog.com?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
 - [Oleg Balunenko](https://www.mentoring-club.com/the-mentors/oleg-balunenko?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
 - [Sidartha Karna](https://github.com/sidarthakarna?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
-- [Ethan Troy](https://ethantroy.dev?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=github)
-- [Love You](https://love.you/?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=opencollective)
 - [Moti ne tirane](https://www.motijavor.com/shqiperi/tirane/?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=opencollective)
+- [Love You](https://love.you/?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=opencollective)
 - [Horoskopi](https://horoskopishqip.com/?utm_source=goreleaser&utm_medium=sponsor&utm_campaign=homepage&utm_content=opencollective)
 
 

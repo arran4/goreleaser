@@ -2,7 +2,6 @@ package client
 
 import (
 	"os"
-	ctx_pkg "context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -254,7 +253,7 @@ func TestGitClient(t *testing.T) {
 
 	t.Run("delete file", func(t *testing.T) {
 		url := testlib.GitMakeBareRepository(t)
-		ctx := testctx.WrapWithCfg(ctx_pkg.Background(), config.Project{Dist: t.TempDir()})
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{Dist: t.TempDir()})
 		repo := Repo{GitURL: url, PrivateKey: testlib.MakeNewSSHKey(t, ""), Name: "testdel"}
 		fc := NewGitUploadClient(repo.Branch)
 		require.NoError(t, fc.CreateFile(ctx, author, repo, []byte("foo"), "bar.txt", "add"))

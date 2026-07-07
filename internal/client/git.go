@@ -31,6 +31,12 @@ type gitClient struct {
 }
 
 func (g *gitClient) ListDir(ctx *context.Context, repo Repo, dir string) ([]string, error) {
+	url, err := tmpl.New(ctx).Apply(repo.GitURL)
+	if err != nil {
+		return nil, fmt.Errorf("git: failed to template git url: %w", err)
+	}
+	repo.Name = cmp.Or(repo.Name, nameFromURL(url))
+
 	parent := filepath.Join(ctx.Config.Dist, "git")
 	name := repo.Name + "-" + g.branch
 	cwd := filepath.Join(parent, name, dir)

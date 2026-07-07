@@ -148,22 +148,6 @@ func TestRunPipe(t *testing.T) {
 			},
 		},
 		{
-			name:       "default-locale",
-			expectPath: "manifests/f/Foo/loc/1.2.1/Foo.loc.",
-			winget: config.Winget{
-				Name:             "loc",
-				Publisher:        "Foo",
-				License:          "MIT",
-				ShortDescription: "foo bar zaz",
-				DefaultLocale:    "en-GB",
-				IDs:              []string{"foo"},
-				Repository: config.RepoRef{
-					Owner: "foo",
-					Name:  "bar",
-				},
-			},
-		},
-		{
 			name: "open-pr",
 			winget: config.Winget{
 				Name:             "foo",
@@ -602,21 +586,6 @@ func TestRunPipe(t *testing.T) {
 			},
 		},
 		{
-			name:             "bad-default-locale-tmpl",
-			expectRunErrorIs: &template.Error{},
-			winget: config.Winget{
-				Name:             "foo",
-				Publisher:        "Beckersoft",
-				License:          "MIT",
-				DefaultLocale:    "{{ .Nope }}",
-				ShortDescription: "foo bar zaz",
-				Repository: config.RepoRef{
-					Owner: "foo",
-					Name:  "bar",
-				},
-			},
-		},
-		{
 			name:                 "skip-upload",
 			expectPublishErrorIs: errSkipUpload,
 			winget: config.Winget{
@@ -788,8 +757,7 @@ func TestRunPipe(t *testing.T) {
 			)).List() {
 				bts, err := os.ReadFile(winget.Path)
 				require.NoError(t, err)
-				cfg := artifact.MustExtra[config.Winget](*winget, wingetConfigExtra)
-				golden.RequireEqualExtSubfolder(t, bts, extFor(winget.Type, cfg.DefaultLocale))
+				golden.RequireEqualExtSubfolder(t, bts, extFor(winget.Type))
 			}
 
 			// publish
@@ -913,8 +881,7 @@ func TestFormatBinary(t *testing.T) {
 	)).List() {
 		bts, err := os.ReadFile(winget.Path)
 		require.NoError(t, err)
-		cfg := artifact.MustExtra[config.Winget](*winget, wingetConfigExtra)
-		golden.RequireEqualExtSubfolder(t, bts, extFor(winget.Type, cfg.DefaultLocale))
+		golden.RequireEqualExtSubfolder(t, bts, extFor(winget.Type))
 	}
 	require.NoError(t, pipe.publishAll(ctx, client))
 	require.True(t, client.CreatedFile)

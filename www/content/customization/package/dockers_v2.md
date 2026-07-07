@@ -179,9 +179,6 @@ dockers_v2:
         - cmd: ./scripts/before-docker.sh
           # Working directory for the command.
           dir: "{{ .ContextDir }}"
-          # Only run this hook if the template evaluates to `true`.
-          # {{< g_inline_version "v2.17-unreleased" >}}
-          if: "{{ eq .Runtime.Goarch \"amd64\" }}"
           # Extra env vars to inject into the hook.
           env:
             - DOCKERFILE={{ .Dockerfile }}

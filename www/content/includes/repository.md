@@ -12,8 +12,7 @@
 
       # Optionally a branch can be provided.
       #
-      # Default: default repository branch, or '{{ .ProjectName }}-{{ .Version }}'
-      # when 'pull_request.enabled' is true. {{< g_inline_version "v2.17-unreleased" >}}
+      # Default: default repository branch.
       # Templates: allowed.
       branch: main
 
