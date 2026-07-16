@@ -362,7 +362,7 @@ func TestRunPipePullRequest(t *testing.T) {
 						Name:   "bar",
 						Branch: "update-{{.Version}}",
 						PullRequest: config.PullRequest{
-							Enabled: "true",
+							Enabled: true,
 							Base: config.PullRequestBase{
 								Owner: "og",
 								Name:  "bar",

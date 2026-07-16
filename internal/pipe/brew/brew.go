@@ -170,14 +170,9 @@ func doPublish(ctx *context.Context, formula *artifact.Artifact, cl client.Clien
 		Branch: brew.Repository.PullRequest.Base.Branch,
 	}
 
-	prEnabled, err := tmpl.New(ctx).Bool(brew.Repository.PullRequest.Enabled)
-	if err != nil {
-		return err
-	}
-
 	// try to sync branch
 	fscli, ok := cl.(client.ForkSyncer)
-	if ok && prEnabled {
+	if ok && brew.Repository.PullRequest.Enabled {
 		if err := fscli.SyncFork(ctx, repo, base); err != nil {
 			log.WithError(err).Warn("could not sync fork")
 		}
@@ -187,7 +182,7 @@ func doPublish(ctx *context.Context, formula *artifact.Artifact, cl client.Clien
 		return err
 	}
 
-	if !prEnabled {
+	if !brew.Repository.PullRequest.Enabled {
 		log.Debug("brews.pull_request disabled")
 		return nil
 	}

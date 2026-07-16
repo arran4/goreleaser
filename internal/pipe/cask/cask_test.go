@@ -345,7 +345,7 @@ func TestFullPipe(t *testing.T) {
 					Name:   "test",
 					Branch: "update-{{.Version}}",
 					PullRequest: config.PullRequest{
-						Enabled: "true",
+						Enabled: true,
 					},
 				}
 			},
@@ -1041,7 +1041,7 @@ func TestRunPipePullRequest(t *testing.T) {
 						Name:   "bar",
 						Branch: "update-{{.Version}}",
 						PullRequest: config.PullRequest{
-							Enabled: "true",
+							Enabled: true,
 						},
 					},
 				},
@@ -1188,7 +1188,7 @@ func TestDefault(t *testing.T) {
 			PrivateKey: "/fake",
 		},
 		PullRequest: config.PullRequest{
-			Enabled: "true",
+			Enabled: true,
 			Base: config.PullRequestBase{
 				Owner:  "foo2",
 				Name:   "bar2",

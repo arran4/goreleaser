@@ -251,14 +251,9 @@ func doPublish(ctx *context.Context, manifest *artifact.Artifact, cl client.Clie
 		Branch: scoop.Repository.PullRequest.Base.Branch,
 	}
 
-	prEnabled, err := tmpl.New(ctx).Bool(scoop.Repository.PullRequest.Enabled)
-	if err != nil {
-		return err
-	}
-
 	// try to sync branch
 	fscli, ok := cl.(client.ForkSyncer)
-	if ok && prEnabled {
+	if ok && scoop.Repository.PullRequest.Enabled {
 		if err := fscli.SyncFork(ctx, repo, base); err != nil {
 			log.WithError(err).Warn("could not sync fork")
 		}
@@ -268,7 +263,7 @@ func doPublish(ctx *context.Context, manifest *artifact.Artifact, cl client.Clie
 		return err
 	}
 
-	if !prEnabled {
+	if !scoop.Repository.PullRequest.Enabled {
 		log.Debug("scoop.pull_request disabled")
 		return nil
 	}
