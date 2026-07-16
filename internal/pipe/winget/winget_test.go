@@ -163,7 +163,7 @@ func TestRunPipe(t *testing.T) {
 					Name:   "bar",
 					Branch: "update-{{.Version}}",
 					PullRequest: config.PullRequest{
-						Enabled: true,
+						Enabled: "true",
 						Base: config.PullRequestBase{
 							Owner: "ms",
 							Name:  "winget",
@@ -791,7 +791,7 @@ func TestRunPipe(t *testing.T) {
 				require.Truef(t, strings.HasPrefix(client.Path, tt.expectPath), "expected %q to begin with %q", client.Path, tt.expectPath)
 			}
 
-			if tt.winget.Repository.PullRequest.Enabled {
+			if tt.winget.Repository.PullRequest.Enabled == "true" {
 				require.True(t, client.SyncedFork)
 				require.True(t, client.OpenedPullRequest)
 			}

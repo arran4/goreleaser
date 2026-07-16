@@ -101,7 +101,7 @@ type PullRequestBase struct {
 }
 
 type PullRequest struct {
-	Enabled bool            `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Enabled string          `yaml:"enabled,omitempty" json:"enabled,omitempty" jsonschema:"oneof_type=string;boolean"`
 	Base    PullRequestBase `yaml:"base,omitempty" json:"base,omitempty"`
 	Draft   bool            `yaml:"draft,omitempty" json:"draft,omitempty"`
 }

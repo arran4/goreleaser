@@ -329,9 +329,14 @@ func doPublish(ctx *context.Context, manifest *artifact.Artifact, cl client.Clie
 		Branch: cfg.Repository.PullRequest.Base.Branch,
 	}
 
+	prEnabled, err := tmpl.New(ctx).Bool(cfg.Repository.PullRequest.Enabled)
+	if err != nil {
+		return err
+	}
+
 	// try to sync branch
 	fscli, ok := cl.(client.ForkSyncer)
-	if ok && cfg.Repository.PullRequest.Enabled {
+	if ok && prEnabled {
 		if err := fscli.SyncFork(ctx, repo, base); err != nil {
 			log.WithError(err).Warn("could not sync fork")
 		}
@@ -341,7 +346,7 @@ func doPublish(ctx *context.Context, manifest *artifact.Artifact, cl client.Clie
 		return err
 	}
 
-	if !cfg.Repository.PullRequest.Enabled {
+	if !prEnabled {
 		log.Debug("krews.pull_request disabled")
 		return nil
 	}

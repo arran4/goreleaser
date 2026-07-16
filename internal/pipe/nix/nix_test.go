@@ -152,7 +152,7 @@ func TestRunPipe(t *testing.T) {
 					Name:   "bar",
 					Branch: "update-{{.Version}}",
 					PullRequest: config.PullRequest{
-						Enabled: true,
+						Enabled: "true",
 					},
 				},
 			},
@@ -602,7 +602,7 @@ func TestRunPipe(t *testing.T) {
 			golden.RequireEqualExt(t, []byte(client.Content), "_publish.nix")
 			require.NotContains(t, client.Content, strings.Repeat("0", 52))
 
-			if tt.nix.Repository.PullRequest.Enabled {
+			if tt.nix.Repository.PullRequest.Enabled == "true" {
 				require.True(t, client.OpenedPullRequest)
 				require.True(t, client.SyncedFork)
 			}

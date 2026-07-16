@@ -417,9 +417,14 @@ func doPublish(ctx *context.Context, hasher fileHasher, cl client.Client, pkg *a
 		Branch: nix.Repository.PullRequest.Base.Branch,
 	}
 
+	prEnabled, err := tmpl.New(ctx).Bool(nix.Repository.PullRequest.Enabled)
+	if err != nil {
+		return err
+	}
+
 	// try to sync branch
 	fscli, ok := cl.(client.ForkSyncer)
-	if ok && nix.Repository.PullRequest.Enabled {
+	if ok && prEnabled {
 		if err := fscli.SyncFork(ctx, repo, base); err != nil {
 			log.WithError(err).Warn("could not sync fork")
 		}
@@ -429,7 +434,7 @@ func doPublish(ctx *context.Context, hasher fileHasher, cl client.Client, pkg *a
 		return err
 	}
 
-	if !nix.Repository.PullRequest.Enabled {
+	if !prEnabled {
 		log.Debug("nix.pull_request disabled")
 		return nil
 	}

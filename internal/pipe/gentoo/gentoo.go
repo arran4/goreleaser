@@ -401,7 +401,11 @@ func (Pipe) Publish(ctx *context.Context) error {
 			}
 		}
 
-		if !g.cfg.Repository.PullRequest.Enabled {
+		prEnabled, err := tmpl.New(ctx).Bool(g.cfg.Repository.PullRequest.Enabled)
+		if err != nil {
+			return err
+		}
+		if !prEnabled {
 			continue
 		}
 
