@@ -71,7 +71,6 @@ func (Pipe) Default(ctx *context.Context) error {
 		if winget.Goamd64 == "" {
 			winget.Goamd64 = "v1"
 		}
-		winget.DefaultLocale = cmp.Or(winget.DefaultLocale, defaultLocale)
 		winget.PackageName = cmp.Or(winget.PackageName, winget.Name)
 	}
 
@@ -132,7 +131,6 @@ func (p Pipe) doRun(ctx *context.Context, winget config.Winget, cl client.Releas
 		&winget.CopyrightURL,
 		&winget.License,
 		&winget.LicenseURL,
-		&winget.DefaultLocale,
 	)
 	if err != nil {
 		return err
@@ -218,7 +216,7 @@ func (p Pipe) doRun(ctx *context.Context, winget config.Winget, cl client.Releas
 	if err := createYAML(ctx, winget, Version{
 		PackageIdentifier: winget.PackageIdentifier,
 		PackageVersion:    ctx.Version,
-		DefaultLocale:     winget.DefaultLocale,
+		DefaultLocale:     defaultLocale,
 		ManifestType:      "version",
 		ManifestVersion:   manifestVersion,
 	}, artifact.WingetVersion); err != nil {
@@ -237,7 +235,7 @@ func (p Pipe) doRun(ctx *context.Context, winget config.Winget, cl client.Releas
 	return createYAML(ctx, winget, Locale{
 		PackageIdentifier:   winget.PackageIdentifier,
 		PackageVersion:      ctx.Version,
-		PackageLocale:       winget.DefaultLocale,
+		PackageLocale:       defaultLocale,
 		Publisher:           winget.Publisher,
 		PublisherURL:        winget.PublisherURL,
 		PublisherSupportURL: winget.PublisherSupportURL,
@@ -379,14 +377,14 @@ func langserverLineFor(tp artifact.Type) string {
 	}
 }
 
-func extFor(tp artifact.Type, locale string) string {
+func extFor(tp artifact.Type) string {
 	switch tp {
 	case artifact.WingetVersion:
 		return ".yaml"
 	case artifact.WingetInstaller:
 		return ".installer.yaml"
 	case artifact.WingetDefaultLocale:
-		return ".locale." + locale + ".yaml"
+		return ".locale." + defaultLocale + ".yaml"
 	default:
 		// should never happen
 		return ""
@@ -435,7 +433,7 @@ func makeInstaller(ctx *context.Context, winget config.Winget, archives []*artif
 	installer := Installer{
 		PackageIdentifier: winget.PackageIdentifier,
 		PackageVersion:    ctx.Version,
-		InstallerLocale:   winget.DefaultLocale,
+		InstallerLocale:   defaultLocale,
 		InstallerType:     "zip",
 		Commands:          []string{},
 		ReleaseDate:       ctx.Date.Format(time.DateOnly),

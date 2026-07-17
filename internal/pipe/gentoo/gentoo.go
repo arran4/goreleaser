@@ -330,7 +330,14 @@ func (Pipe) Publish(ctx *context.Context) error {
 		if err != nil {
 			return err
 		}
-		repo := client.RepoFromRef(g.cfg.Repository)
+		repo := client.Repo{
+			Owner:         g.cfg.Repository.Owner,
+			Name:          g.cfg.Repository.Name,
+			Branch:        g.cfg.Repository.Branch,
+			GitURL:        g.cfg.Repository.Git.URL,
+			GitSSHCommand: g.cfg.Repository.Git.SSHCommand,
+			PrivateKey:    g.cfg.Repository.Git.PrivateKey,
+		}
 
 		cl, err = client.NewIfToken(ctx, cl, g.cfg.Repository.Token)
 		if err != nil {

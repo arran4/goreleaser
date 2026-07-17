@@ -442,12 +442,28 @@ type Scoop struct {
 	Goamd64               string       `yaml:"goamd64,omitempty" json:"goamd64,omitempty"`
 }
 
+type GentooPullRequest struct {
+	Enabled string          `yaml:"enabled,omitempty" json:"enabled,omitempty" jsonschema:"oneof_type=string;boolean"`
+	Base    PullRequestBase `yaml:"base,omitempty" json:"base,omitempty"`
+	Draft   bool            `yaml:"draft,omitempty" json:"draft,omitempty"`
+}
+
+type GentooRepoRef struct {
+	Owner  string `yaml:"owner,omitempty" json:"owner,omitempty"`
+	Name   string `yaml:"name,omitempty" json:"name,omitempty"`
+	Token  string `yaml:"token,omitempty" json:"token,omitempty"`
+	Branch string `yaml:"branch,omitempty" json:"branch,omitempty"`
+
+	Git         GitRepoRef        `yaml:"git,omitempty" json:"git,omitempty"`
+	PullRequest GentooPullRequest `yaml:"pull_request,omitempty" json:"pull_request,omitempty"`
+}
+
 // Gentoo contains the gentoo ebuild section.
 type Gentoo struct {
-	Name                  string       `yaml:"name,omitempty" json:"name,omitempty"`
-	Path                  string       `yaml:"path,omitempty" json:"path,omitempty"`
-	Repository            RepoRef      `yaml:"repository,omitempty" json:"repository,omitempty"`
-	CommitAuthor          CommitAuthor `yaml:"commit_author,omitempty" json:"commit_author,omitempty"`
+	Name                  string        `yaml:"name,omitempty" json:"name,omitempty"`
+	Path                  string        `yaml:"path,omitempty" json:"path,omitempty"`
+	Repository            GentooRepoRef `yaml:"repository,omitempty" json:"repository,omitempty"`
+	CommitAuthor          CommitAuthor  `yaml:"commit_author,omitempty" json:"commit_author,omitempty"`
 	CommitMessageTemplate string       `yaml:"commit_msg_template,omitempty" json:"commit_msg_template,omitempty"`
 	Homepage              string       `yaml:"homepage,omitempty" json:"homepage,omitempty"`
 	Description           string       `yaml:"description,omitempty" json:"description,omitempty"`

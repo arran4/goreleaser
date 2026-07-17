@@ -18,7 +18,7 @@ func TestDoRunMultiArch(t *testing.T) {
 		Dist:        dist,
 		ProjectName: "foo",
 		Gentoos: []config.Gentoo{{
-			Repository: config.RepoRef{Name: "overlay"},
+			Repository: config.GentooRepoRef{Name: "overlay"},
 			Bin:        true,
 		}},
 	}, testctx.WithVersion("1.0.0"))
@@ -59,7 +59,7 @@ func TestDoRunCustomBindir(t *testing.T) {
 		Dist:        dist,
 		ProjectName: "foo",
 		Gentoos: []config.Gentoo{{
-			Repository: config.RepoRef{Name: "overlay"},
+			Repository: config.GentooRepoRef{Name: "overlay"},
 			Bin:        true,
 			Bindir:     "/usr/bin",
 		}},
@@ -105,7 +105,7 @@ func TestDoRunWithFiles(t *testing.T) {
 		Dist:        dist,
 		ProjectName: "foo",
 		Gentoos: []config.Gentoo{{
-			Repository: config.RepoRef{Name: "overlay"},
+			Repository: config.GentooRepoRef{Name: "overlay"},
 			Bin:        true,
 			Files: []config.ExtraFile{{
 				Glob:         "./foo.service",
@@ -153,7 +153,7 @@ func TestDoRunRequiresPath(t *testing.T) {
 		Dist:        t.TempDir(),
 		ProjectName: "foo",
 		Gentoos: []config.Gentoo{{
-			Repository: config.RepoRef{Name: "overlay"},
+			Repository: config.GentooRepoRef{Name: "overlay"},
 			Bin:        true,
 		}},
 	}, testctx.WithVersion("1.0.0"))
