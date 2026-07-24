@@ -182,3 +182,37 @@ func (a *HomebrewDependency) UnmarshalYAML(unmarshal func(any) error) error {
 
 	return nil
 }
+
+// UnmarshalYAML is a custom unmarshaler that wraps strings in extra files.
+func (f *ExtraFile) UnmarshalYAML(unmarshal func(any) error) error {
+	type t ExtraFile
+	var str string
+	if err := unmarshal(&str); err == nil {
+		*f = ExtraFile{Glob: str}
+		return nil
+	}
+
+	var file t
+	if err := unmarshal(&file); err != nil {
+		return err
+	}
+	*f = ExtraFile(file)
+	return nil
+}
+
+// UnmarshalYAML is a custom unmarshaler that wraps strings in extra files.
+func (f *GentooInstallItem) UnmarshalYAML(unmarshal func(any) error) error {
+	type t GentooInstallItem
+	var str string
+	if err := unmarshal(&str); err == nil {
+		*f = GentooInstallItem{Src: str}
+		return nil
+	}
+
+	var file t
+	if err := unmarshal(&file); err != nil {
+		return err
+	}
+	*f = GentooInstallItem(file)
+	return nil
+}
