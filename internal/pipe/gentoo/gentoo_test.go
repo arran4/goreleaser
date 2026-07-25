@@ -306,11 +306,11 @@ func TestRunTemplateRef(t *testing.T) {
 	require.NoError(t, Pipe{}.Default(ctx))
 
 	ctx.Artifacts.Add(&artifact.Artifact{
-		Name:    "foo_1.0.0_linux_amd64.tar.gz",
-		Path:    "amd64.tar.gz",
-		Goos:    "linux",
-		Goarch:  "amd64",
-		Type:    artifact.UploadableArchive,
+		Name:   "foo_1.0.0_linux_amd64.tar.gz",
+		Path:   "amd64.tar.gz",
+		Goos:   "linux",
+		Goarch: "amd64",
+		Type:   artifact.UploadableArchive,
 	})
 
 	cli := client.NewMock()
