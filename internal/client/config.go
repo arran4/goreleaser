@@ -38,12 +38,32 @@ func TemplateRef(apply func(s string) (string, error), ref config.RepoRef) (conf
 	if err != nil {
 		return ref, err
 	}
+	prBaseName, err := apply(ref.PullRequest.Base.Name)
+	if err != nil {
+		return ref, err
+	}
+	prBaseOwner, err := apply(ref.PullRequest.Base.Owner)
+	if err != nil {
+		return ref, err
+	}
+	prBaseBranch, err := apply(ref.PullRequest.Base.Branch)
+	if err != nil {
+		return ref, err
+	}
 	return config.RepoRef{
 		Owner:       owner,
 		Name:        name,
 		Token:       ref.Token,
 		Branch:      branch,
-		PullRequest: ref.PullRequest,
+		PullRequest: config.PullRequest{
+			Enabled: ref.PullRequest.Enabled,
+			Base: config.PullRequestBase{
+				Name:   prBaseName,
+				Owner:  prBaseOwner,
+				Branch: prBaseBranch,
+			},
+			Draft: ref.PullRequest.Draft,
+		},
 		Git: config.GitRepoRef{
 			URL:        gitURL,
 			PrivateKey: privateKey,

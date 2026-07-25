@@ -35,6 +35,15 @@ func TestTemplateRef(t *testing.T) {
 		Name:   "name",
 		Branch: "branch",
 		Token:  "token",
+		PullRequest: config.PullRequest{
+			Enabled: true,
+			Base: config.PullRequestBase{
+				Name:   "prname",
+				Owner:  "prowner",
+				Branch: "prbranch",
+			},
+			Draft: true,
+		},
 		Git: config.GitRepoRef{
 			URL:        "giturl",
 			SSHCommand: "gitsshcommand",
@@ -97,6 +106,36 @@ func TestTemplateRef(t *testing.T) {
 		t.Parallel()
 		_, err := TemplateRef(func(s string) (string, error) {
 			if s == "token" || s == "privatekey" {
+				return "", fmt.Errorf("nope")
+			}
+			return s, nil
+		}, expected)
+		require.Error(t, err)
+	})
+	t.Run("fail prbase name", func(t *testing.T) {
+		t.Parallel()
+		_, err := TemplateRef(func(s string) (string, error) {
+			if s == "token" || s == "prname" {
+				return "", fmt.Errorf("nope")
+			}
+			return s, nil
+		}, expected)
+		require.Error(t, err)
+	})
+	t.Run("fail prbase owner", func(t *testing.T) {
+		t.Parallel()
+		_, err := TemplateRef(func(s string) (string, error) {
+			if s == "token" || s == "prowner" {
+				return "", fmt.Errorf("nope")
+			}
+			return s, nil
+		}, expected)
+		require.Error(t, err)
+	})
+	t.Run("fail prbase branch", func(t *testing.T) {
+		t.Parallel()
+		_, err := TemplateRef(func(s string) (string, error) {
+			if s == "token" || s == "prbranch" {
 				return "", fmt.Errorf("nope")
 			}
 			return s, nil
