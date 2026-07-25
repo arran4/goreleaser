@@ -283,6 +283,47 @@ func TestDoRunRequiresPath(t *testing.T) {
 	require.EqualError(t, err, "gentoo.path is required and must include the category/package ebuild path")
 }
 
+func TestRunTemplateRef(t *testing.T) {
+	dist := t.TempDir()
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+		Dist:        dist,
+		ProjectName: "foo",
+		Gentoos: []config.Gentoo{{
+			Repository: config.RepoRef{
+				Owner: "foo",
+				Name:  "bar-{{ .ProjectName }}",
+				PullRequest: config.PullRequest{
+					Enabled: true,
+					Base: config.PullRequestBase{
+						Branch: "test-{{ .ProjectName }}",
+					},
+				},
+			},
+			Bin:     true,
+			License: "MIT",
+		}},
+	}, testctx.WithVersion("1.0.0"))
+	require.NoError(t, Pipe{}.Default(ctx))
+
+	ctx.Artifacts.Add(&artifact.Artifact{
+		Name:    "foo_1.0.0_linux_amd64.tar.gz",
+		Path:    "amd64.tar.gz",
+		Goos:    "linux",
+		Goarch:  "amd64",
+		Type:    artifact.UploadableArchive,
+	})
+
+	cli := client.NewMock()
+	require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], cli))
+
+	arts := ctx.Artifacts.Filter(artifact.ByType(artifact.GentooEbuild)).List()
+	require.Len(t, arts, 1)
+
+	cfg := artifact.MustExtra[config.Gentoo](*arts[0], ebuildExtra)
+	require.Equal(t, "foo", cfg.Repository.Owner)
+	require.Equal(t, "bar-foo", cfg.Repository.Name)
+}
+
 func TestHandleGentooManifestAndMetadata(t *testing.T) {
 	dist := t.TempDir()
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
