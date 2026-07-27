@@ -10,6 +10,7 @@ func RepoFromRef(ref config.RepoRef) Repo {
 		Owner:         ref.Owner,
 		Name:          ref.Name,
 		Branch:        ref.Branch,
+		PullRequest:   ref.PullRequest,
 		GitURL:        ref.Git.URL,
 		GitSSHCommand: ref.Git.SSHCommand,
 		PrivateKey:    ref.Git.PrivateKey,

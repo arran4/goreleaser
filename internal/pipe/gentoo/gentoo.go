@@ -265,6 +265,9 @@ func (Pipe) Default(ctx *context.Context) error {
 		if g.License == "" {
 			return errors.New("gentoo.license is required")
 		}
+		if g.Repository.PullRequest.Enabled && g.Repository.Branch == "" {
+			g.Repository.Branch = "goreleaser/{{ .ProjectName }}-{{ .Version }}"
+		}
 		if g.Name == "" {
 			g.Name = ctx.Config.ProjectName
 		}

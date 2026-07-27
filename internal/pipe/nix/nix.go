@@ -75,6 +75,9 @@ func (Pipe) Default(ctx *context.Context) error {
 
 		nix.CommitAuthor = commitauthor.Default(nix.CommitAuthor)
 
+		if nix.Repository.PullRequest.Enabled && nix.Repository.Branch == "" {
+			nix.Repository.Branch = "goreleaser/{{ .ProjectName }}-{{ .Version }}"
+		}
 		if nix.CommitMessageTemplate == "" {
 			nix.CommitMessageTemplate = "{{ .ProjectName }}: {{ .PreviousTag }} -> {{ .Tag }}"
 		}

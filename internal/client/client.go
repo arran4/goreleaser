@@ -39,6 +39,7 @@ type Repo struct {
 	Owner         string
 	Name          string
 	Branch        string
+	PullRequest   config.PullRequest
 	GitURL        string
 	GitSSHCommand string
 	PrivateKey    string

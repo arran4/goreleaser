@@ -49,6 +49,9 @@ func (Pipe) Default(ctx *context.Context) error {
 		if krew.CommitMessageTemplate == "" {
 			krew.CommitMessageTemplate = "Krew manifest update for {{ .ProjectName }} version {{ .Tag }}"
 		}
+		if krew.Repository.PullRequest.Enabled && krew.Repository.Branch == "" {
+			krew.Repository.Branch = "goreleaser/{{ .ProjectName }}-{{ .Version }}"
+		}
 		if krew.Name == "" {
 			krew.Name = ctx.Config.ProjectName
 		}

@@ -87,6 +87,9 @@ func (Pipe) Publish(ctx *context.Context) error {
 func (Pipe) Default(ctx *context.Context) error {
 	for i := range ctx.Config.Scoops {
 		scoop := &ctx.Config.Scoops[i]
+		if scoop.Repository.PullRequest.Enabled && scoop.Repository.Branch == "" {
+			scoop.Repository.Branch = "goreleaser/{{ .ProjectName }}-{{ .Version }}"
+		}
 		if scoop.Name == "" {
 			scoop.Name = ctx.Config.ProjectName
 		}

@@ -72,6 +72,9 @@ func (Pipe) Default(ctx *context.Context) error {
 			winget.Goamd64 = "v1"
 		}
 		winget.PackageName = cmp.Or(winget.PackageName, winget.Name)
+		if winget.Repository.PullRequest.Enabled && winget.Repository.Branch == "" {
+			winget.Repository.Branch = "goreleaser/{{ .ProjectName }}-{{ .Version }}"
+		}
 	}
 
 	return nil

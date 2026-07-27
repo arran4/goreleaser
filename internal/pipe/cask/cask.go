@@ -59,6 +59,9 @@ func (Pipe) Default(ctx *context.Context) error {
 		if brew.CommitMessageTemplate == "" {
 			brew.CommitMessageTemplate = "Brew cask update for {{ .ProjectName }} version {{ .Tag }}"
 		}
+		if brew.Repository.PullRequest.Enabled && brew.Repository.Branch == "" {
+			brew.Repository.Branch = "goreleaser/{{ .ProjectName }}-{{ .Version }}"
+		}
 		if brew.Name == "" {
 			brew.Name = ctx.Config.ProjectName
 		}
