@@ -23,6 +23,9 @@ src_install() {
     newexe "prog3" "prog2" || die "Failed to install binary"
   fi
   if use doc; then
-    dodoc README* || die
+    local d
+    for d in README*; do
+      [[ -e "${d}" ]] && dodoc "${d}"
+    done
   fi
 }

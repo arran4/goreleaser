@@ -22,6 +22,9 @@ src_install() {
   doins "simple.yaml"
   doman "foo.1"
   if use doc; then
-    dodoc README* || die
+    local d
+    for d in README*; do
+      [[ -e "${d}" ]] && dodoc "${d}"
+    done
   fi
 }

@@ -196,7 +196,10 @@ src_install() {
   dodoc "{{ . }}"
 {{- end }}
   if use doc; then
-    dodoc README* || die
+    local d
+    for d in README*; do
+      [[ -e "${d}" ]] && dodoc "${d}"
+    done
   fi
 }
 `
