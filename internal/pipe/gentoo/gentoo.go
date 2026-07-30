@@ -260,9 +260,6 @@ func (Pipe) Default(ctx *context.Context) error {
 		if g.Type == "" {
 			g.Type = "bin"
 		}
-		if len(g.Keywords) == 0 {
-			g.Keywords = config.StringArray{"~amd64"}
-		}
 		if g.License == "" {
 			return errors.New("gentoo.license is required")
 		}
