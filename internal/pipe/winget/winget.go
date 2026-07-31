@@ -320,7 +320,7 @@ func doPublish(ctx *context.Context, cl client.Client, wingets []*artifact.Artif
 			CreateFiles(ctx, author, repo, msg, files)
 	}
 
-	cl, err = client.NewIfToken(ctx, cl, winget.Repository.Token)
+	repoClient, err := client.NewIfToken(ctx, cl, winget.Repository.Token)
 	if err != nil {
 		return err
 	}
@@ -332,7 +332,7 @@ func doPublish(ctx *context.Context, cl client.Client, wingets []*artifact.Artif
 	}
 
 	// try to sync branch
-	fscli, ok := cl.(client.ForkSyncer)
+	fscli, ok := repoClient.(client.ForkSyncer)
 	if ok && winget.Repository.PullRequest.Enabled {
 		if err := fscli.SyncFork(ctx, repo, base); err != nil {
 			log.WithError(err).Warn("could not sync fork")
@@ -340,7 +340,7 @@ func doPublish(ctx *context.Context, cl client.Client, wingets []*artifact.Artif
 	}
 
 	for _, file := range files {
-		if err := cl.CreateFile(
+		if err := repoClient.CreateFile(
 			ctx,
 			author,
 			repo,
@@ -358,7 +358,7 @@ func doPublish(ctx *context.Context, cl client.Client, wingets []*artifact.Artif
 	}
 
 	log.Info("winget.pull_request enabled, creating a PR")
-	pcl, ok := cl.(client.PullRequestOpener)
+	pcl, ok := repoClient.(client.PullRequestOpener)
 	if !ok {
 		return errors.New("client does not support pull requests")
 	}

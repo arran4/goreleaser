@@ -571,18 +571,9 @@ func (Pipe) Publish(ctx *context.Context) error {
 		}
 		repo := client.RepoFromRef(g.cfg.Repository)
 
-		cl, err = client.NewIfToken(ctx, cl, g.cfg.Repository.Token)
+		repoClient, err := client.NewIfToken(ctx, cl, g.cfg.Repository.Token)
 		if err != nil {
 			return err
-		}
-
-		repoClient := cl
-		if g.cfg.Repository.Token != "" {
-			var err error
-			repoClient, err = client.NewIfToken(ctx, cl, g.cfg.Repository.Token)
-			if err != nil {
-				return err
-			}
 		}
 
 		var deletedEbuilds []string

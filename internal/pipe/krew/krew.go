@@ -318,7 +318,7 @@ func doPublish(ctx *context.Context, manifest *artifact.Artifact, cl client.Clie
 			CreateFile(ctx, author, repo, content, gpath, msg)
 	}
 
-	cl, err = client.NewIfToken(ctx, cl, cfg.Repository.Token)
+	repoClient, err := client.NewIfToken(ctx, cl, cfg.Repository.Token)
 	if err != nil {
 		return err
 	}
@@ -330,14 +330,14 @@ func doPublish(ctx *context.Context, manifest *artifact.Artifact, cl client.Clie
 	}
 
 	// try to sync branch
-	fscli, ok := cl.(client.ForkSyncer)
+	fscli, ok := repoClient.(client.ForkSyncer)
 	if ok && cfg.Repository.PullRequest.Enabled {
 		if err := fscli.SyncFork(ctx, repo, base); err != nil {
 			log.WithError(err).Warn("could not sync fork")
 		}
 	}
 
-	if err := cl.CreateFile(ctx, author, repo, content, gpath, msg); err != nil {
+	if err := repoClient.CreateFile(ctx, author, repo, content, gpath, msg); err != nil {
 		return err
 	}
 
@@ -347,7 +347,7 @@ func doPublish(ctx *context.Context, manifest *artifact.Artifact, cl client.Clie
 	}
 
 	log.Info("krews.pull_request enabled, creating a PR")
-	pcl, ok := cl.(client.PullRequestOpener)
+	pcl, ok := repoClient.(client.PullRequestOpener)
 	if !ok {
 		return errors.New("client does not support pull requests")
 	}
