@@ -551,42 +551,31 @@ const (
 		commitDivider
 )
 
-// between returns the text enclosed by the open and close markers, or an empty
-// string if either is missing. The close marker is looked up after the open one
-// so a commit message containing a literal marker cannot make the bounds cross.
-func between(line, open, closee string) string {
-	start := strings.Index(line, open)
-	if start < 0 {
-		return ""
-	}
-	start += len(open)
-	end := strings.Index(line[start:], closee)
-	if end < 0 {
-		return ""
-	}
-	return line[start : start+end]
-}
-
 func decode(line string) Item {
 	var (
-		sha         = between(line, shaOpen, shaClose)
-		message     = between(line, messageOpen, messageClose)
-		messageBody = between(line, messageBodyOpen, messageBodyClose)
-		author      = between(line, authorOpen, authorClose)
-		email       = between(line, emailOpen, emailClose)
+		shaOpenIdx          = strings.Index(line, shaOpen) + len(shaOpen)
+		shaCloseIdx         = strings.Index(line, shaClose)
+		messageOpenIdx      = strings.Index(line, messageOpen) + len(messageOpen)
+		messageCloseIdx     = strings.Index(line, messageClose)
+		messageBodyOpenIdx  = strings.Index(line, messageBodyOpen) + len(messageBodyOpen)
+		messageBodyCloseIdx = strings.Index(line, messageBodyClose)
+		authorOpenIdx       = strings.Index(line, authorOpen) + len(authorOpen)
+		authorCloseIdx      = strings.Index(line, authorClose)
+		emailOpenIdx        = strings.Index(line, emailOpen) + len(emailOpen)
+		emailCloseIdx       = strings.Index(line, emailClose)
 	)
 
 	return Item{
-		SHA:     sha,
-		Message: message,
+		SHA:     line[shaOpenIdx:shaCloseIdx],
+		Message: line[messageOpenIdx:messageCloseIdx],
 		Authors: append(
 			[]Author{{
-				Name:  author,
-				Email: email,
+				Name:  line[authorOpenIdx:authorCloseIdx],
+				Email: line[emailOpenIdx:emailCloseIdx],
 			}},
-			changelog.ExtractCoAuthors(messageBody)...,
+			changelog.ExtractCoAuthors(line[messageBodyOpenIdx:messageBodyCloseIdx])...,
 		),
-		AuthorName:  author,
-		AuthorEmail: email,
+		AuthorName:  line[authorOpenIdx:authorCloseIdx],
+		AuthorEmail: line[emailOpenIdx:emailCloseIdx],
 	}
 }

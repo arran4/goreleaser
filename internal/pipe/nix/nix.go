@@ -435,11 +435,7 @@ func doPublish(ctx *context.Context, hasher fileHasher, cl client.Client, pkg *a
 	}
 
 	log.Info("nix.pull_request enabled, creating a PR")
-	prcl, err := client.NewIfToken(ctx, cl, nix.Repository.PullRequest.Token)
-	if err != nil {
-		return err
-	}
-	pcl, ok := prcl.(client.PullRequestOpener)
+	pcl, ok := cl.(client.PullRequestOpener)
 	if !ok {
 		return errors.New("client does not support pull requests")
 	}

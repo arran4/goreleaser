@@ -24,7 +24,19 @@ type giteaClient struct {
 	client *gitea.Client
 }
 
-var _ Client = &giteaClient{}
+func (c *giteaClient) ListDir(_ *context.Context, _ Repo, _ string) ([]string, error) {
+	return nil, ErrNotImplemented
+}
+
+func (c *giteaClient) DeleteFile(_ *context.Context, _ config.CommitAuthor, _ Repo, _ string, _ string) error {
+	return ErrNotImplemented
+}
+
+var (
+	_ Client          = &giteaClient{}
+	_ DirectoryLister = &giteaClient{}
+	_ FileDeleter     = &giteaClient{}
+)
 
 func giteaDo[T any](ctx *context.Context, fn func() (T, *gitea.Response, error)) (T, *gitea.Response, error) {
 	var result T
@@ -217,6 +229,18 @@ func (c *giteaClient) CreateFile(
 		return err
 	}
 
+	if currentFile != nil && currentFile.Content != nil {
+		decodedContent, decodeErr := base64.StdEncoding.DecodeString(*currentFile.Content)
+		if decodeErr == nil && string(decodedContent) == string(content) {
+			log.
+				WithField("repository", repo.String()).
+				WithField("name", repo.Name).
+				WithField("file", path).
+				Info("file already exists with the same content, skipping update")
+			return nil
+		}
+	}
+
 	// update file
 	_, _, err = giteaDo(ctx, func() (*gitea.FileResponse, *gitea.Response, error) {
 		return c.client.UpdateFile(repo.Owner, repo.Name, path, gitea.UpdateFileOptions{
@@ -377,4 +401,23 @@ func (c *giteaClient) Upload(
 		_, resp, err := c.client.CreateReleaseAttachment(owner, repoName, giteaReleaseID, file, artifact.Name)
 		return retryx.HTTP(err, must(resp).Response)
 	}, retryx.IsRetriable)
+}
+
+func (c *giteaClient) DownloadFile(ctx *context.Context, repo Repo, path string) ([]byte, error) {
+	branch := repo.Branch
+	if branch == "" {
+		var err error
+		branch, err = c.getDefaultBranch(ctx, repo)
+		if err != nil {
+			return nil, err
+		}
+	}
+	content, resp, err := c.client.GetFile(repo.Owner, repo.Name, branch, path)
+	if err != nil {
+		if resp != nil && resp.StatusCode == 404 {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return content, nil
 }
