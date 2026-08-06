@@ -49,9 +49,6 @@ var ebuildTemplate string
 //go:embed templates/md5-cache.tmpl
 var metaCacheTemplate string
 
-//go:embed templates/metadata.xml.tmpl
-var metadataXMLTemplate string
-
 type installData struct {
 	Source   string
 	Target   string
@@ -1276,25 +1273,17 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 			}
 		}
 
-		useFlags := gentooUseFlags(cfg)
-		tmplData := struct {
-			config.Gentoo
-			UseFlags []config.GentooUseFlag
-		}{
-			Gentoo:   cfg,
-			UseFlags: make([]config.GentooUseFlag, len(useFlags)),
-		}
-		for i, f := range useFlags {
-			tmplData.UseFlags[i] = config.GentooUseFlag{
-				Flag:        strings.TrimLeft(f.Flag, "+-"),
-				Description: f.Description,
-			}
+		marshaled, err := xml.MarshalIndent(meta, "", "\t")
+		if err != nil {
+			return fmt.Errorf("failed to marshal metadata.xml: %w", err)
 		}
 
 		var buf bytes.Buffer
-		if err := template.Must(template.New("metadata.xml").Parse(metadataXMLTemplate)).Execute(&buf, tmplData); err != nil {
-			return err
-		}
+		buf.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+		buf.WriteString("<!DOCTYPE pkgmetadata SYSTEM \"https://www.gentoo.org/dtd/metadata.dtd\">\n")
+		buf.Write(marshaled)
+		buf.WriteString("\n")
+
 		*files = append(*files, client.RepoFile{
 			Content: buf.Bytes(),
 			Path:    metadataPath,
