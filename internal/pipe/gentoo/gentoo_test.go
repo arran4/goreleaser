@@ -414,6 +414,24 @@ func TestHandleGentooManifestAndMetadata(t *testing.T) {
 	require.Contains(t, string(files[1].Content), "MISC metadata.xml")
 }
 
+func TestHandleGentooMetadata(t *testing.T) {
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
+	cfg := config.Gentoo{
+		Name:     "goreleaser-gentoo-smoke",
+		Path:     "app-misc/goreleaser-gentoo-smoke-bin/goreleaser-gentoo-smoke-bin-1.0.0.ebuild",
+		Homepage: "https://github.com/arran4/goreleaser-gentoo-smoke",
+		UseFlags: []config.GentooUseFlag{{
+			Flag:        "systemd",
+			Description: "enables systemd installation",
+		}},
+	}
+
+	var files []client.RepoFile
+	require.NoError(t, handleGentooManifestAndMetadata(ctx, cfg, nil, client.Repo{}, &files, nil))
+	require.NotEmpty(t, files)
+	golden.RequireEqual(t, files[0].Content)
+}
+
 func TestHandleGentooManifestThick(t *testing.T) {
 	dist := t.TempDir()
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
@@ -728,6 +746,7 @@ func TestTemplateScenarios(t *testing.T) {
 				Systemd       []installItemData
 			}{
 				InstallGroups: tc.installGroups,
+				UseFlags:      gentooUseFlags(config.Gentoo{}),
 			}
 			var buf bytes.Buffer
 			err := template.Must(template.New("ebuild").Parse(tmplStr)).Execute(&buf, data)
@@ -782,16 +801,20 @@ func TestDoRunWithSystemdAndUseFlags(t *testing.T) {
 
 func TestGentooUseFlagsIncludesInstallConditions(t *testing.T) {
 	flags := gentooUseFlags(config.Gentoo{
-		UseFlags: []config.GentooUseFlag{{Flag: "+systemd"}},
+		UseFlags: []config.GentooUseFlag{
+			{Flag: "+systemd"},
+			{Flag: "doc", Description: "Install documentation"},
+		},
 		Dobin: []config.GentooInstallItem{{
 			Use: []string{"!systemd", "zsh"},
 		}},
-		Systemd: []config.GentooInstallItem{{
+		Doexe: []config.GentooInstallItem{{
 			Use: []string{"bash"},
 		}},
 	})
 
 	require.Equal(t, []config.GentooUseFlag{
+		{Flag: "doc", Description: "Install documentation"},
 		{Flag: "+systemd"},
 		{Flag: "bash"},
 		{Flag: "zsh"},
@@ -1160,24 +1183,45 @@ func TestMetaCache(t *testing.T) {
 }
 
 func TestEbuildDeleter(t *testing.T) {
-	var files []client.RepoFile
-	var deleted []string
-	deleter := &ebuildDeleter{
-		dir:            "app-misc/foo-bin",
-		category:       "app-misc",
-		files:          &files,
-		deletedEbuilds: &deleted,
-	}
+	t.Run("does not delete a missing metadata cache entry", func(t *testing.T) {
+		var files []client.RepoFile
+		var deleted []string
+		deleter := &ebuildDeleter{
+			dir:            "app-misc/foo-bin",
+			files:          &files,
+			deletedEbuilds: &deleted,
+		}
 
-	deleter.Delete("foo-bin-1.0.0.ebuild")
+		deleter.Delete("foo-bin-1.0.0.ebuild")
 
-	require.Len(t, deleted, 1)
-	require.Equal(t, "foo-bin-1.0.0.ebuild", deleted[0])
-	require.Len(t, files, 2)
-	require.Equal(t, "app-misc/foo-bin/foo-bin-1.0.0.ebuild", files[0].Path)
-	require.True(t, files[0].Delete)
-	require.Equal(t, "metadata/md5-cache/app-misc/foo-bin-1.0.0", files[1].Path)
-	require.True(t, files[1].Delete)
+		require.Equal(t, []string{"foo-bin-1.0.0.ebuild"}, deleted)
+		require.Equal(t, []client.RepoFile{{
+			Path:   "app-misc/foo-bin/foo-bin-1.0.0.ebuild",
+			Delete: true,
+		}}, files)
+	})
+
+	t.Run("deletes an existing metadata cache entry", func(t *testing.T) {
+		var files []client.RepoFile
+		var deleted []string
+		deleter := &ebuildDeleter{
+			dir:            "app-misc/foo-bin",
+			category:       "app-misc",
+			metaCacheFiles: map[string]struct{}{"foo-bin-1.0.0": {}},
+			files:          &files,
+			deletedEbuilds: &deleted,
+		}
+
+		deleter.Delete("foo-bin-1.0.0.ebuild")
+
+		require.Len(t, deleted, 1)
+		require.Equal(t, "foo-bin-1.0.0.ebuild", deleted[0])
+		require.Len(t, files, 2)
+		require.Equal(t, "app-misc/foo-bin/foo-bin-1.0.0.ebuild", files[0].Path)
+		require.True(t, files[0].Delete)
+		require.Equal(t, "metadata/md5-cache/app-misc/foo-bin-1.0.0", files[1].Path)
+		require.True(t, files[1].Delete)
+	})
 }
 
 func TestEbuildData(t *testing.T) {
@@ -1285,4 +1329,33 @@ func TestInstallExtraFiles(t *testing.T) {
 	require.Len(t, arts, 1)
 	require.Equal(t, "files/foo.conf", arts[0].Name)
 	require.Equal(t, artifact.GentooFile, arts[0].Type)
+}
+
+func TestGentooMetadata(t *testing.T) {
+	t.Run("AddMaintainers valid and empty email", func(t *testing.T) {
+		var meta gentooMetadata
+		err := meta.AddMaintainers([]config.GentooMaintainer{
+			{Name: "Alice", Email: "alice@example.com"},
+		})
+		require.NoError(t, err)
+		require.Len(t, meta.Maintainers, 1)
+		require.Equal(t, "alice@example.com", meta.Maintainers[0].Email)
+
+		err = meta.AddMaintainers([]config.GentooMaintainer{{Name: "Invalid"}})
+		require.EqualError(t, err, "gentoo maintainer email is required")
+	})
+
+	t.Run("AddUseFlags and SetUpstream and Marshal", func(t *testing.T) {
+		var meta gentooMetadata
+		meta.AddUseFlags([]config.GentooUseFlag{
+			{Flag: "systemd", Description: "Enable systemd"},
+		})
+		meta.SetUpstream("https://bugs.example.com", "https://example.com/doc")
+
+		content, err := meta.Marshal()
+		require.NoError(t, err)
+		require.Contains(t, string(content), `<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">`)
+		require.Contains(t, string(content), `<flag name="systemd">Enable systemd</flag>`)
+		require.Contains(t, string(content), `<bugs-to>https://bugs.example.com</bugs-to>`)
+	})
 }
