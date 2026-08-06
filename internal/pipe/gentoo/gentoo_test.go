@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -413,6 +414,24 @@ func TestHandleGentooManifestAndMetadata(t *testing.T) {
 	require.Contains(t, string(files[1].Content), "MISC metadata.xml")
 }
 
+func TestHandleGentooMetadata(t *testing.T) {
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
+	cfg := config.Gentoo{
+		Name:     "goreleaser-gentoo-smoke",
+		Path:     "app-misc/goreleaser-gentoo-smoke-bin/goreleaser-gentoo-smoke-bin-1.0.0.ebuild",
+		Homepage: "https://github.com/arran4/goreleaser-gentoo-smoke",
+		UseFlags: []config.GentooUseFlag{{
+			Flag:        "systemd",
+			Description: "enables systemd installation",
+		}},
+	}
+
+	var files []client.RepoFile
+	require.NoError(t, handleGentooManifestAndMetadata(ctx, cfg, nil, client.Repo{}, &files, nil))
+	require.NotEmpty(t, files)
+	golden.RequireEqual(t, files[0].Content)
+}
+
 func TestHandleGentooManifestThick(t *testing.T) {
 	dist := t.TempDir()
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
@@ -643,6 +662,7 @@ func TestTemplateScenarios(t *testing.T) {
 	testCases := []struct {
 		name          string
 		installGroups []installGroup
+		doexe         []installItemData
 	}{
 		{
 			name: "scenario_1",
@@ -698,6 +718,14 @@ func TestTemplateScenarios(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "scenario_doexe",
+			doexe: []installItemData{
+				{Source: "custom_bin", Target: "/opt/custom/custom_bin", Dir: "/opt/custom", Base: "custom_bin"},
+				{Source: "renamed_bin_x86", Target: "/opt/other/renamed_bin", Dir: "/opt/other", Base: "renamed_bin"},
+				{Source: "default_bin", Target: "", Dir: "", Base: ""},
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -727,6 +755,9 @@ func TestTemplateScenarios(t *testing.T) {
 				Systemd       []installItemData
 			}{
 				InstallGroups: tc.installGroups,
+				Doexe:         tc.doexe,
+				Bindir:        "/usr/bin",
+				UseFlags:      gentooUseFlags(config.Gentoo{}),
 			}
 			var buf bytes.Buffer
 			err := template.Must(template.New("ebuild").Parse(tmplStr)).Execute(&buf, data)
@@ -781,7 +812,10 @@ func TestDoRunWithSystemdAndUseFlags(t *testing.T) {
 
 func TestGentooUseFlagsIncludesInstallConditions(t *testing.T) {
 	flags := gentooUseFlags(config.Gentoo{
-		UseFlags: []config.GentooUseFlag{{Flag: "+systemd"}},
+		UseFlags: []config.GentooUseFlag{
+			{Flag: "+systemd"},
+			{Flag: "doc", Description: "Install documentation"},
+		},
 		Dobin: []config.GentooInstallItem{{
 			Use: []string{"!systemd", "zsh"},
 		}},
@@ -791,6 +825,7 @@ func TestGentooUseFlagsIncludesInstallConditions(t *testing.T) {
 	})
 
 	require.Equal(t, []config.GentooUseFlag{
+		{Flag: "doc", Description: "Install documentation"},
 		{Flag: "+systemd"},
 		{Flag: "bash"},
 		{Flag: "zsh"},
@@ -1111,5 +1146,92 @@ func TestSkipUpload(t *testing.T) {
 		})
 		err := Pipe{}.Publish(ctx)
 		require.NoError(t, err)
+	})
+}
+
+func TestMetaCache(t *testing.T) {
+	t.Run("meta_cache enabled", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "foo",
+			Gentoos: []config.Gentoo{{
+				Category:  "app-misc",
+				Name:      "foo",
+				Path:      "app-misc/foo-bin/foo-bin-{{ .Version }}.ebuild",
+				Bin:       true,
+				License:   "MIT",
+				MetaCache: true,
+			}},
+		}, testctx.WithVersion("1.0.0"))
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "foo_1.0.0_linux_amd64.tar.gz",
+			Path:   "dist/foo_1.0.0_linux_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+		})
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+		cacheFile := filepath.Join(dist, "gentoo", "default", "metadata", "md5-cache", "app-misc", "foo-bin-1.0.0")
+		content, err := os.ReadFile(cacheFile)
+		require.NoError(t, err)
+		require.Contains(t, string(content), "DEFINED_PHASES=")
+		require.Contains(t, string(content), "IUSE=doc\n")
+		require.Contains(t, string(content), "_md5_=")
+	})
+
+	t.Run("meta_cache disabled by layout.conf", func(t *testing.T) {
+		repoClient := mockFileDownloader{
+			content: []byte("cache-formats = pms\n"),
+		}
+		settings, err := loadOverlaySettings(testctx.Wrap(t.Context()), config.Gentoo{
+			MetaCache: true,
+		}, repoClient, client.Repo{})
+		require.NoError(t, err)
+		metaCacheAllowed := !settings.hasCacheFormatsConfigured || slices.Contains(settings.cacheFormats, "md5-dict") || slices.Contains(settings.cacheFormats, "md5-cache")
+		require.False(t, metaCacheAllowed)
+	})
+}
+
+func TestEbuildDeleter(t *testing.T) {
+	t.Run("does not delete a missing metadata cache entry", func(t *testing.T) {
+		var files []client.RepoFile
+		var deleted []string
+		deleter := &ebuildDeleter{
+			dir:            "app-misc/foo-bin",
+			files:          &files,
+			deletedEbuilds: &deleted,
+		}
+
+		deleter.Delete("foo-bin-1.0.0.ebuild")
+
+		require.Equal(t, []string{"foo-bin-1.0.0.ebuild"}, deleted)
+		require.Equal(t, []client.RepoFile{{
+			Path:   "app-misc/foo-bin/foo-bin-1.0.0.ebuild",
+			Delete: true,
+		}}, files)
+	})
+
+	t.Run("deletes an existing metadata cache entry", func(t *testing.T) {
+		var files []client.RepoFile
+		var deleted []string
+		deleter := &ebuildDeleter{
+			dir:            "app-misc/foo-bin",
+			category:       "app-misc",
+			metaCacheFiles: map[string]struct{}{"foo-bin-1.0.0": {}},
+			files:          &files,
+			deletedEbuilds: &deleted,
+		}
+
+		deleter.Delete("foo-bin-1.0.0.ebuild")
+
+		require.Len(t, deleted, 1)
+		require.Equal(t, "foo-bin-1.0.0.ebuild", deleted[0])
+		require.Len(t, files, 2)
+		require.Equal(t, "app-misc/foo-bin/foo-bin-1.0.0.ebuild", files[0].Path)
+		require.True(t, files[0].Delete)
+		require.Equal(t, "metadata/md5-cache/app-misc/foo-bin-1.0.0", files[1].Path)
+		require.True(t, files[1].Delete)
 	})
 }

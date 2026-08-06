@@ -108,6 +108,25 @@ gentoo_overlay:
     # Default: "/opt/bin" if type is "bin", otherwise "/usr/bin".
     bindir: "/usr/bin"
 
+    # Enable Gentoo metadata cache generation (metadata/md5-cache/<category>/<package>-<version>).
+    # Note: If the repository's metadata/layout.conf disables cache-formats (e.g. cache-formats is specified without md5-dict),
+    # metadata cache generation will be disabled automatically.
+    #
+    # Default: false.
+    meta_cache: true
+
+    # Overrides for manifest hashes. Usually derived from metadata/layout.conf.
+    #
+    # Default: null (defers to layout.conf or ["BLAKE2B", "SHA512"]).
+    # manifest_hashes:
+    #   - BLAKE2B
+    #   - SHA512
+
+    # Overrides thin manifests generation. Usually derived from metadata/layout.conf.
+    #
+    # Default: null (defers to layout.conf or false).
+    # thin_manifests: false
+
     # The Gentoo maintainers of the ebuild.
     maintainers:
       - name: "John Doe"
