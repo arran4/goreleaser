@@ -702,6 +702,51 @@ func TestGitHubCreateFileHappyPathCreate(t *testing.T) {
 			return
 		}
 
+
+		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "blob_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/main" && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "main_commit_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/feature" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/newbranch" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/commits/") && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"sha": "base_commit_sha", "tree": {"sha": "base_tree_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/trees" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_tree_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/commits" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_commit_sha"}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "PATCH" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"ref": "refs/heads/feature", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+
 		t.Error("unhandled request: " + r.URL.Path)
 	})
 
@@ -742,6 +787,51 @@ func TestGitHubCreateFileHappyPathUpdate(t *testing.T) {
 			assert.NoError(t, json.NewDecoder(r.Body).Decode(&data))
 			assert.Equal(t, "fake", data.GetSHA())
 			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+
+		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "blob_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/main" && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "main_commit_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/feature" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/newbranch" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/commits/") && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"sha": "base_commit_sha", "tree": {"sha": "base_tree_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/trees" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_tree_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/commits" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_commit_sha"}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "PATCH" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"ref": "refs/heads/feature", "object": {"sha": "new_commit_sha"}}`)
 			return
 		}
 
@@ -800,6 +890,51 @@ func TestGitHubCreateFileFeatureBranchAlreadyExists(t *testing.T) {
 			return
 		}
 
+
+		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "blob_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/main" && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "main_commit_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/feature" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/newbranch" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/commits/") && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"sha": "base_commit_sha", "tree": {"sha": "base_tree_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/trees" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_tree_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/commits" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_commit_sha"}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "PATCH" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"ref": "refs/heads/feature", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+
 		t.Error("unhandled request: " + r.Method + " " + r.URL.Path)
 	})
 
@@ -855,6 +990,51 @@ func TestGitHubCreateFileFeatureBranchDoesNotExist(t *testing.T) {
 			return
 		}
 
+
+		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "blob_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/main" && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "main_commit_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/feature" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/newbranch" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/commits/") && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"sha": "base_commit_sha", "tree": {"sha": "base_tree_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/trees" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_tree_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/commits" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_commit_sha"}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "PATCH" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"ref": "refs/heads/feature", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+
 		t.Error("unhandled request: " + r.Method + " " + r.URL.Path)
 	})
 
@@ -878,24 +1058,31 @@ func TestGitHubCreateFileFeatureBranchNilObject(t *testing.T) {
 	t.Parallel()
 	srv := githubTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
-
-		if r.URL.Path == "/api/v3/repos/someone/something/branches/feature" && r.Method == http.MethodGet {
+		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "blob_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/feature" && r.Method == "GET" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-
-		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/main" {
-			// Return ref with nil object
-			fmt.Fprint(w, `{}`)
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/main" && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": null}`)
 			return
 		}
-
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/commits/") && r.Method == "GET" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		if r.URL.Path == "/api/v3/repos/someone/something" {
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, `{"default_branch": "main"}`)
 			return
 		}
 
+		w.WriteHeader(http.StatusInternalServerError)
 		t.Error("unhandled request: " + r.Method + " " + r.URL.Path)
 	})
 
@@ -914,8 +1101,7 @@ func TestGitHubCreateFileFeatureBranchNilObject(t *testing.T) {
 
 	err = client.CreateFile(ctx, config.CommitAuthor{}, repo, []byte("content"), "file.txt", "message")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "could not create ref")
-	require.Contains(t, err.Error(), "sha must be provided")
+	require.Contains(t, err.Error(), "could not get commit")
 }
 
 func TestGitHubChangelogRetriesOnSecondaryRateLimit(t *testing.T) {
@@ -1340,6 +1526,51 @@ func TestGitHubCreateFileWithGitHubAppToken(t *testing.T) {
 			return
 		}
 
+
+		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "blob_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/main" && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "main_commit_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/feature" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/newbranch" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/commits/") && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"sha": "base_commit_sha", "tree": {"sha": "base_tree_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/trees" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_tree_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/commits" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_commit_sha"}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "PATCH" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"ref": "refs/heads/feature", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+
 		t.Error("unhandled request: " + r.URL.Path)
 	})
 
@@ -1393,6 +1624,51 @@ func TestGitHubCreateFileWithoutGitHubAppToken(t *testing.T) {
 			assert.Equal(t, "test@example.com", committerMap["email"])
 
 			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+
+		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "blob_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/main" && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "main_commit_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/feature" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/newbranch" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/commits/") && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"sha": "base_commit_sha", "tree": {"sha": "base_tree_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/trees" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_tree_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/commits" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_commit_sha"}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "PATCH" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"ref": "refs/heads/feature", "object": {"sha": "new_commit_sha"}}`)
 			return
 		}
 
@@ -2095,6 +2371,51 @@ func TestGitHubCreateFileDefaultBranchError(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+
+		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "blob_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/main" && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "main_commit_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/feature" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/newbranch" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/commits/") && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"sha": "base_commit_sha", "tree": {"sha": "base_tree_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/trees" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_tree_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/commits" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_commit_sha"}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "PATCH" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"ref": "refs/heads/feature", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+
 		t.Error("unhandled request: " + r.Method + " " + r.URL.Path)
 	})
 
@@ -2145,6 +2466,51 @@ func TestGitHubCreateFileBranchNotFoundCreatesRef(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
+
+		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "blob_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/main" && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "main_commit_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/feature" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/newbranch" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/commits/") && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"sha": "base_commit_sha", "tree": {"sha": "base_tree_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/trees" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_tree_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/commits" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_commit_sha"}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "PATCH" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"ref": "refs/heads/feature", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+
 		t.Error("unhandled request: " + r.Method + " " + r.URL.Path)
 	})
 
@@ -2173,10 +2539,55 @@ func TestGitHubCreateFileGetContentsError(t *testing.T) {
 			fmt.Fprint(w, `{"default_branch": "main"}`)
 			return
 		}
-		if r.URL.Path == "/api/v3/repos/someone/something/contents/file.txt" && r.Method == http.MethodGet {
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/main" && r.Method == http.MethodGet {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+
+		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "blob_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/main" && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "main_commit_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/feature" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/newbranch" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/commits/") && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"sha": "base_commit_sha", "tree": {"sha": "base_tree_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/trees" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_tree_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/commits" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_commit_sha"}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "PATCH" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"ref": "refs/heads/feature", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+
 		t.Error("unhandled request: " + r.Method + " " + r.URL.Path)
 	})
 
@@ -2194,7 +2605,7 @@ func TestGitHubCreateFileGetContentsError(t *testing.T) {
 
 	err = client.CreateFile(ctx, config.CommitAuthor{}, repo, []byte("content"), "file.txt", "message")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "could not get")
+	require.Contains(t, err.Error(), "could not get ref")
 }
 
 func TestGitHubCreateFileUpdateError(t *testing.T) {
@@ -2211,10 +2622,55 @@ func TestGitHubCreateFileUpdateError(t *testing.T) {
 			fmt.Fprint(w, `{"sha": "existing-sha"}`)
 			return
 		}
-		if r.URL.Path == "/api/v3/repos/someone/something/contents/file.txt" && r.Method == http.MethodPut {
+		if r.URL.Path == "/api/v3/repos/someone/something/git/refs/heads/main" && r.Method == http.MethodPatch {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+
+		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "blob_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/main" && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "main_commit_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/feature" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/ref/heads/newbranch" && r.Method == "GET" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/commits/") && r.Method == "GET" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"sha": "base_commit_sha", "tree": {"sha": "base_tree_sha"}}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/trees" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_tree_sha"}`)
+			return
+		}
+		if r.URL.Path == "/api/v3/repos/someone/something/git/commits" && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"sha": "new_commit_sha"}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "PATCH" {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"ref": "refs/heads/main", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v3/repos/someone/something/git/refs") && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"ref": "refs/heads/feature", "object": {"sha": "new_commit_sha"}}`)
+			return
+		}
+
 		t.Error("unhandled request: " + r.Method + " " + r.URL.Path)
 	})
 
@@ -2232,7 +2688,7 @@ func TestGitHubCreateFileUpdateError(t *testing.T) {
 
 	err = client.CreateFile(ctx, config.CommitAuthor{}, repo, []byte("content"), "file.txt", "message")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "could not update")
+	require.Contains(t, err.Error(), "could not update ref")
 }
 
 func TestGitHubCreateReleaseDeleteDraftError(t *testing.T) {
