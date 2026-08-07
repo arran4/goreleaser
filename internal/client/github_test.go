@@ -702,7 +702,6 @@ func TestGitHubCreateFileHappyPathCreate(t *testing.T) {
 			return
 		}
 
-
 		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprint(w, `{"sha": "blob_sha"}`)
@@ -789,7 +788,6 @@ func TestGitHubCreateFileHappyPathUpdate(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-
 
 		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
 			w.WriteHeader(http.StatusCreated)
@@ -890,7 +888,6 @@ func TestGitHubCreateFileFeatureBranchAlreadyExists(t *testing.T) {
 			return
 		}
 
-
 		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprint(w, `{"sha": "blob_sha"}`)
@@ -989,7 +986,6 @@ func TestGitHubCreateFileFeatureBranchDoesNotExist(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-
 
 		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
 			w.WriteHeader(http.StatusCreated)
@@ -1526,7 +1522,6 @@ func TestGitHubCreateFileWithGitHubAppToken(t *testing.T) {
 			return
 		}
 
-
 		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprint(w, `{"sha": "blob_sha"}`)
@@ -1626,7 +1621,6 @@ func TestGitHubCreateFileWithoutGitHubAppToken(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-
 
 		if r.URL.Path == "/api/v3/repos/someone/something/git/blobs" {
 			w.WriteHeader(http.StatusCreated)

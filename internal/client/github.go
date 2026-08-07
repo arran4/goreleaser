@@ -443,10 +443,12 @@ func (c *githubClient) CreateFile(
 		Info("pushing")
 
 	// 1. Create a blob for the file
+	encoded := base64.StdEncoding.EncodeToString(content)
+	encoding := "base64"
 	blob, _, err := githubDo(ctx, func() (*github.Blob, *github.Response, error) {
 		return c.client.Git.CreateBlob(ctx, repo.Owner, repo.Name, github.Blob{
-			Content:  github.Ptr(base64.StdEncoding.EncodeToString(content)),
-			Encoding: github.Ptr("base64"),
+			Content:  &encoded,
+			Encoding: &encoding,
 		})
 	})
 	if err != nil {
@@ -495,13 +497,16 @@ func (c *githubClient) CreateFile(
 	if blob != nil {
 		blobSHA = blob.GetSHA()
 	}
+
+	mode := "100644"
+	blobType := "blob"
 	tree, _, err := githubDo(ctx, func() (*github.Tree, *github.Response, error) {
 		return c.client.Git.CreateTree(ctx, repo.Owner, repo.Name, baseTreeSHA, []*github.TreeEntry{
 			{
-				Path: github.Ptr(path),
-				Mode: github.Ptr("100644"),
-				Type: github.Ptr("blob"),
-				SHA:  github.Ptr(blobSHA),
+				Path: &path,
+				Mode: &mode,
+				Type: &blobType,
+				SHA:  &blobSHA,
 			},
 		})
 	})
@@ -516,7 +521,7 @@ func (c *githubClient) CreateFile(
 	}
 	newCommit, _, err := githubDo(ctx, func() (*github.Commit, *github.Response, error) {
 		return c.client.Git.CreateCommit(ctx, repo.Owner, repo.Name, github.Commit{
-			Message:   github.Ptr(message),
+			Message:   &message,
 			Tree:      tree,
 			Parents:   parents,
 			Author:    committer,
@@ -545,7 +550,7 @@ func (c *githubClient) CreateFile(
 		_, resp, err := githubDo(ctx, func() (*github.Reference, *github.Response, error) {
 			return c.client.Git.UpdateRef(ctx, repo.Owner, repo.Name, "refs/heads/"+branch, github.UpdateRef{
 				SHA:   newCommit.GetSHA(),
-				Force: github.Ptr(false),
+				Force: new(bool),
 			})
 		})
 		if err != nil {
