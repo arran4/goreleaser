@@ -672,25 +672,113 @@ func (Pipe) Publish(ctx *context.Context) error {
 			}
 		}
 
+		stateRepo := repo
+		if g.cfg.Repository.PullRequest.Enabled {
+			stateRepo.Branch = g.cfg.Repository.PullRequest.Base.Branch
+		}
+
 		var deletedEbuilds []string
+		var ebuilds []string
+		var names []string
+
+		dir := filepath.ToSlash(filepath.Dir(g.cfg.Path))
+		prefix := filepath.Base(dir) + "-"
+
 		// list existing ebuilds
-		if lister, ok := repoClient.(client.DirectoryLister); ok && g.cfg.KeepVersions > 0 && g.cfg.VersionRetentionStrategy != "" {
-			dir := filepath.ToSlash(filepath.Dir(g.cfg.Path))
-			listRepo := repo
-			if g.cfg.Repository.PullRequest.Enabled {
-				listRepo.Branch = g.cfg.Repository.PullRequest.Base.Branch
-			}
-			names, err := lister.ListDir(ctx, listRepo, dir)
+		if lister, ok := repoClient.(client.DirectoryLister); ok {
+			names, err = lister.ListDir(ctx, stateRepo, dir)
 			if err != nil {
 				return err
 			}
-			var ebuilds []string
-			prefix := filepath.Base(dir) + "-"
 			for _, n := range names {
 				if strings.HasPrefix(n, prefix) && strings.HasSuffix(n, ".ebuild") {
 					ebuilds = append(ebuilds, n)
 				}
 			}
+		}
+
+		if len(ebuilds) == 0 {
+			settings, err := loadOverlaySettings(ctx, g.cfg, repoClient, stateRepo)
+			if err == nil && !settings.thin {
+				manifestPath := pathlib.Join(dir, "Manifest")
+				manifestLines, err := loadManifestLines(ctx, repoClient, stateRepo, manifestPath)
+				if err == nil {
+					for _, line := range manifestLines {
+						fields := strings.Fields(line)
+						if len(fields) >= 2 && fields[0] == "EBUILD" {
+							ebuilds = append(ebuilds, fields[1])
+						}
+					}
+				}
+			}
+		}
+
+		if len(ebuilds) > 0 && g.cfg.UpdateVersions {
+			if dl, ok := repoClient.(client.FileDownloader); ok {
+				for i := range g.files {
+					if !strings.HasSuffix(g.files[i].Path, ".ebuild") || g.files[i].Delete {
+						continue
+					}
+
+					fName := filepath.Base(g.files[i].Path)
+					v := parseGentooVersion(fName, prefix)
+					if v == nil {
+						continue
+					}
+
+					var maxR int = -1
+					var maxREbuild string
+					for _, e := range ebuilds {
+						ev := parseGentooVersion(e, prefix)
+						if ev != nil && ev.version.Equal(v.version) {
+							if ev.revision > maxR {
+								maxR = ev.revision
+								maxREbuild = e
+							}
+						}
+					}
+
+					if maxR != -1 && maxREbuild != "" {
+						existingEbuildContent, err := dl.DownloadFile(ctx, stateRepo, pathlib.Join(dir, maxREbuild))
+						if err == nil {
+							strippedExisting := stripComments(existingEbuildContent)
+							strippedNew := stripComments(g.files[i].Content)
+
+							isDifferent := !bytes.Equal(strippedExisting, strippedNew)
+
+							// Also check if any extra files or the manifest differs
+							if !isDifferent {
+								for _, f := range g.files {
+									if f.Path == g.files[i].Path || f.Delete {
+										continue
+									}
+									existingContent, dErr := dl.DownloadFile(ctx, stateRepo, f.Path)
+									if dErr != nil || !bytes.Equal(existingContent, f.Content) {
+										isDifferent = true
+										break
+									}
+								}
+							}
+
+							if !isDifferent {
+								log.WithField("file", fName).Debug("existing ebuild matches new ebuild content, not creating a new revision")
+								// Point to the existing ebuild name
+								g.files[i].Path = pathlib.Join(dir, maxREbuild)
+							} else {
+								newRev := maxR + 1
+								vStr := strings.TrimSuffix(strings.TrimPrefix(fName, prefix), ".ebuild")
+								newEbuildName := fmt.Sprintf("%s%s-r%d.ebuild", prefix, vStr, newRev)
+								newEbuildPath := pathlib.Join(dir, newEbuildName)
+								log.WithField("file", fName).WithField("new_file", newEbuildName).Info("ebuild content changed, bumping revision")
+								g.files[i].Path = newEbuildPath
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if len(ebuilds) > 0 && g.cfg.KeepVersions > 0 && g.cfg.VersionRetentionStrategy != "" {
 			sort.Slice(ebuilds, func(i, j int) bool {
 				vI := parseGentooVersion(ebuilds[i], prefix)
 				vJ := parseGentooVersion(ebuilds[j], prefix)
@@ -716,12 +804,14 @@ func (Pipe) Publish(ctx *context.Context) error {
 
 			category := strings.Split(filepath.ToSlash(filepath.Clean(g.cfg.Path)), "/")[0]
 			metaCacheFiles := map[string]struct{}{}
-			cacheNames, err := lister.ListDir(ctx, listRepo, pathlib.Join("metadata", "md5-cache", category))
-			if err != nil && !errors.Is(err, client.ErrNotFound) && !errors.Is(err, client.ErrNotImplemented) {
-				return err
-			}
-			for _, name := range cacheNames {
-				metaCacheFiles[name] = struct{}{}
+			if lister, ok := repoClient.(client.DirectoryLister); ok {
+				cacheNames, err := lister.ListDir(ctx, stateRepo, pathlib.Join("metadata", "md5-cache", category))
+				if err != nil && !errors.Is(err, client.ErrNotFound) && !errors.Is(err, client.ErrNotImplemented) {
+					return err
+				}
+				for _, name := range cacheNames {
+					metaCacheFiles[name] = struct{}{}
+				}
 			}
 
 			deleter := &ebuildDeleter{
@@ -819,11 +909,6 @@ func (Pipe) Publish(ctx *context.Context) error {
 					}
 				}
 			}
-		}
-
-		stateRepo := repo
-		if g.cfg.Repository.PullRequest.Enabled {
-			stateRepo.Branch = g.cfg.Repository.PullRequest.Base.Branch
 		}
 
 		settings, err := loadOverlaySettings(ctx, g.cfg, repoClient, stateRepo)
@@ -1020,6 +1105,19 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, in, 0o644)
+}
+
+func stripComments(content []byte) []byte {
+	var result []byte
+	lines := bytes.Split(content, []byte{'\n'})
+	for _, line := range lines {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) > 0 && trimmed[0] != '#' {
+			result = append(result, line...)
+			result = append(result, '\n')
+		}
+	}
+	return result
 }
 
 func generateManifestLine(recordType, filename, path string, content []byte, manifestHashes []string) (string, error) {
