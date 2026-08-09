@@ -37,7 +37,7 @@ func (Pipe) Skip(ctx *context.Context) bool {
 }
 
 func (Pipe) Default(ctx *context.Context) error {
-	ids := ids.New("gentoo_overlay")
+	ids := ids.New("gentoo_overlays")
 	for i := range ctx.Config.Gentoos {
 		g := &ctx.Config.Gentoos[i]
 		g.CommitAuthor = commitauthor.Default(g.CommitAuthor)
