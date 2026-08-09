@@ -9,10 +9,10 @@ weight: 150
 After releasing to GitHub, GitLab, or Gitea, GoReleaser can generate and publish
 a _Gentoo Ebuild_ to an overlay repository.
 
-The `gentoo_overlay` section specifies how the ebuilds should be created:
+The `gentoo_overlays` section specifies how the ebuilds should be created:
 
 ```yaml {filename=".goreleaser.yaml"}
-gentoo_overlay:
+gentoo_overlays:
   - # ID of the gentoo configuration, must be unique.
     #
     # Default: "default".
