@@ -466,7 +466,7 @@ type Gentoo struct {
 	Bin                      bool                `yaml:"bin" json:"bin"`
 	Type                     string              `yaml:"type,omitempty" json:"type,omitempty"`
 	KeepVersions             int                 `yaml:"keep_versions,omitempty" json:"keep_versions,omitempty"`
-	ConflictResolution       string              `yaml:"conflict_resolution,omitempty" json:"conflict_resolution,omitempty"`
+	ConflictResolution       ConflictResolution  `yaml:"conflict_resolution,omitempty" json:"conflict_resolution,omitempty"`
 	VersionRetentionStrategy string              `yaml:"version_retention_strategy,omitempty" json:"version_retention_strategy,omitempty"`
 	SkipUpload               string              `yaml:"skip_upload,omitempty" json:"skip_upload,omitempty" jsonschema:"oneof_type=string;boolean"`
 	SkipFilesValidation      bool                `yaml:"skip_files_validation,omitempty" json:"skip_files_validation,omitempty"`
@@ -1748,3 +1748,11 @@ type MCPPackage struct {
 type MCPTransport struct {
 	Type string `yaml:"type,omitempty" json:"type,omitempty" jsonschema:"enum=stdio,enum=streamable-http,enum=sse"`
 }
+
+type ConflictResolution string
+
+const (
+	ConflictResolutionFail      ConflictResolution = "Fail"
+	ConflictResolutionOverwrite ConflictResolution = "Overwrite"
+	ConflictResolutionRevision  ConflictResolution = "Revision"
+)

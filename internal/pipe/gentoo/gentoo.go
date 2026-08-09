@@ -396,10 +396,17 @@ func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient cl
 		}
 	}
 
-	if len(ebuilds) > 0 && strings.EqualFold(g.cfg.ConflictResolution, "Revision") {
-		dl, ok := repoClient.(client.FileDownloader)
-		if ok {
-			g.updateVersions(ctx, dl, stateRepo, dir, prefix, ebuilds)
+	if len(ebuilds) > 0 {
+		switch g.cfg.ConflictResolution {
+		case config.ConflictResolutionRevision:
+			dl, ok := repoClient.(client.FileDownloader)
+			if ok {
+				g.updateVersions(ctx, dl, stateRepo, dir, prefix, ebuilds)
+			}
+		case config.ConflictResolutionOverwrite:
+			// overwrites by default, no specific action required
+		case config.ConflictResolutionFail:
+			return nil, fmt.Errorf("ebuilds already exist for %s", prefix)
 		}
 	}
 

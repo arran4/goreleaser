@@ -182,3 +182,22 @@ func (a *HomebrewDependency) UnmarshalYAML(unmarshal func(any) error) error {
 
 	return nil
 }
+
+// UnmarshalYAML handles case-insensitive unmarshaling for ConflictResolution.
+func (c *ConflictResolution) UnmarshalYAML(unmarshal func(any) error) error {
+	var s string
+	if err := unmarshal(&s); err != nil {
+		return err
+	}
+	switch {
+	case strings.EqualFold(s, string(ConflictResolutionFail)):
+		*c = ConflictResolutionFail
+	case strings.EqualFold(s, string(ConflictResolutionOverwrite)):
+		*c = ConflictResolutionOverwrite
+	case strings.EqualFold(s, string(ConflictResolutionRevision)):
+		*c = ConflictResolutionRevision
+	default:
+		*c = ConflictResolution(s)
+	}
+	return nil
+}
