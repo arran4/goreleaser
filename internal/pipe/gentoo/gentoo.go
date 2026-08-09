@@ -71,7 +71,7 @@ func (Pipe) Default(ctx *context.Context) error {
 		if g.KeepVersions < 0 {
 			return errors.New("gentoo.keep_versions must be greater than or equal to 0")
 		}
-		if g.VersionRetentionStrategy != "" && g.VersionRetentionStrategy != "keep_latest" && g.VersionRetentionStrategy != "keep_prereleases" {
+		if g.VersionRetentionStrategy != "" && g.VersionRetentionStrategy != config.VersionRetentionStrategyKeepLatest && g.VersionRetentionStrategy != config.VersionRetentionStrategyKeepPrereleases {
 			return fmt.Errorf("gentoo.version_retention_strategy %q is not valid, must be one of [keep_latest, keep_prereleases]", g.VersionRetentionStrategy)
 		}
 		if g.KeepVersions > 0 && g.VersionRetentionStrategy == "" {
@@ -464,7 +464,7 @@ func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient cl
 		deletedEbuilds: &deletedEbuilds,
 	}
 
-	if g.cfg.VersionRetentionStrategy == "keep_prereleases" {
+	if g.cfg.VersionRetentionStrategy == config.VersionRetentionStrategyKeepPrereleases {
 		var allEbuilds []string
 		allEbuilds = append(allEbuilds, ebuilds...)
 		allEbuilds = append(allEbuilds, newFiles...)
@@ -532,7 +532,7 @@ func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient cl
 				}
 			}
 		}
-	} else if g.cfg.VersionRetentionStrategy == "keep_latest" {
+	} else if g.cfg.VersionRetentionStrategy == config.VersionRetentionStrategyKeepLatest {
 		newUniqueCount := 0
 		for _, n := range newFiles {
 			if !slices.Contains(ebuilds, n) {
