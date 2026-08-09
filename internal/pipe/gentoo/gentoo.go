@@ -397,7 +397,7 @@ func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient cl
 	}
 
 	if len(ebuilds) > 0 {
-		switch config.ConflictResolution(g.cfg.ConflictResolution) {
+		switch g.cfg.ConflictResolution {
 		case config.ConflictResolutionFail:
 			for _, ebuild := range ebuilds {
 				for _, file := range g.files {
