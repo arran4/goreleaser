@@ -528,21 +528,22 @@ func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient cl
 		}
 	}
 
-	if len(ebuilds) == 0 {
-		settings, err := loadOverlaySettings(ctx, g.cfg, repoClient, stateRepo)
-		if err == nil && !settings.thin {
-			manifestPath := filepath.ToSlash(filepath.Join(dir, "Manifest"))
-			manifestLines, err := loadManifestLines(ctx, repoClient, stateRepo, manifestPath)
-			if err == nil {
-				for _, line := range manifestLines {
-					fields := strings.Fields(line)
-					if len(fields) >= 2 && fields[0] == "EBUILD" {
-						ebuilds = append(ebuilds, fields[1])
-					}
+	settings, err := loadOverlaySettings(ctx, g.cfg, repoClient, stateRepo)
+	if err == nil && !settings.thin {
+		manifestPath := filepath.ToSlash(filepath.Join(dir, "Manifest"))
+		manifestLines, err := loadManifestLines(ctx, repoClient, stateRepo, manifestPath)
+		if err == nil {
+			for _, line := range manifestLines {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 && fields[0] == "EBUILD" {
+					ebuilds = append(ebuilds, fields[1])
 				}
 			}
 		}
 	}
+
+	slices.Sort(ebuilds)
+	ebuilds = slices.Compact(ebuilds)
 
 	if len(ebuilds) > 0 {
 		switch g.cfg.ConflictResolution {
