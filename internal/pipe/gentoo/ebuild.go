@@ -130,7 +130,14 @@ func (d ebuildData) FormattedSrcURIs() []string {
 	return srcURIs
 }
 
+func (d ebuildData) HasEclasses() bool {
+	return len(d.Systemd) > 0
+}
+
 func (d ebuildData) RenderMetaCache(ebuildContent string) (string, error) {
+	if d.HasEclasses() {
+		return "", errors.New("cannot render metadata cache for ebuild with inherited eclasses")
+	}
 	h := md5.Sum([]byte(ebuildContent))
 	md5Hex := hex.EncodeToString(h[:])
 
