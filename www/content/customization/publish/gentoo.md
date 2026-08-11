@@ -51,7 +51,7 @@ gentoo_overlays:
 
     # Keywords to be applied to the package.
     #
-    # Default: ["~amd64"].
+    # Default: Derived from build artifacts (e.g. ["~amd64", "~arm64"]).
     keywords:
       - "~amd64"
       - "~arm64"

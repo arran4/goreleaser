@@ -350,6 +350,44 @@ func TestDefaultRequiresLicense(t *testing.T) {
 	require.EqualError(t, Pipe{}.Default(ctx), "gentoo.license is required")
 }
 
+func TestArtifactDerivedKeywords(t *testing.T) {
+	dist := t.TempDir()
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+		Dist:        dist,
+		ProjectName: "foo",
+		Gentoos: []config.Gentoo{{
+			Repository: config.RepoRef{Name: "overlay"},
+			Bin:        true,
+			License:    "MIT",
+		}},
+	}, testctx.WithVersion("1.0.0"))
+
+	ctx.Artifacts.Add(&artifact.Artifact{
+		Name:   "foo_1.0.0_linux_amd64.tar.gz",
+		Path:   "amd64.tar.gz",
+		Goos:   "linux",
+		Goarch: "amd64",
+		Type:   artifact.UploadableArchive,
+		Extra:  map[string]any{artifact.ExtraID: "foo"},
+	})
+	ctx.Artifacts.Add(&artifact.Artifact{
+		Name:   "foo_1.0.0_linux_arm64.tar.gz",
+		Path:   "arm64.tar.gz",
+		Goos:   "linux",
+		Goarch: "arm64",
+		Type:   artifact.UploadableArchive,
+		Extra:  map[string]any{artifact.ExtraID: "foo"},
+	})
+
+	require.NoError(t, Pipe{}.Default(ctx))
+	require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+
+	ebuildPath := filepath.Join(dist, "gentoo", "default", "app-misc", "foo-bin", "foo-bin-1.0.0.ebuild")
+	content, err := os.ReadFile(ebuildPath)
+	require.NoError(t, err)
+	require.Contains(t, string(content), `KEYWORDS="~amd64 ~arm64"`)
+}
+
 func TestDoRunRequiresPath(t *testing.T) {
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
 		Dist:        t.TempDir(),
