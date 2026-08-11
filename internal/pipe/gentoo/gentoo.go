@@ -162,12 +162,17 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		return err
 	}
 
+	seenGentooArch := make(map[string]*artifact.Artifact)
 	for _, art := range arches {
 		url, err := tmpl.New(ctx).WithArtifact(art).Apply(uriTemplate)
 		if err != nil {
 			return err
 		}
 		kw := gentooArch(art.Goarch)
+		if prev, exists := seenGentooArch[kw]; exists {
+			return fmt.Errorf("multiple linux archives map to Gentoo architecture %q (%s and %s); please filter artifacts or use ids", kw, prev.Name, art.Name)
+		}
+		seenGentooArch[kw] = art
 		archInfos = append(archInfos, archData{
 			Keyword: kw,
 			File:    art.Name,

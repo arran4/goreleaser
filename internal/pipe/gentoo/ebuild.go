@@ -311,6 +311,8 @@ func gentooArch(goarch string) string {
 		return "amd64"
 	case "arm64":
 		return "arm64"
+	case "loong64":
+		return "loong"
 	case "riscv64":
 		return "riscv"
 	case "ppc64le":

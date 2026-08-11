@@ -966,6 +966,7 @@ func TestGentooArch(t *testing.T) {
 		{"386", "386", "x86"},
 		{"amd64", "amd64", "amd64"},
 		{"arm64", "arm64", "arm64"},
+		{"loong64", "loong64", "loong"},
 		{"riscv64", "riscv64", "riscv"},
 		{"ppc64le", "ppc64le", "ppc64"},
 		{"s390x", "s390x", "s390"},
@@ -976,6 +977,41 @@ func TestGentooArch(t *testing.T) {
 			require.Equal(t, tt.expected, gentooArch(tt.goarch))
 		})
 	}
+}
+
+func TestDoRunDuplicateGentooArch(t *testing.T) {
+	dist := t.TempDir()
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+		Dist:        dist,
+		ProjectName: "foo",
+		Gentoos: []config.Gentoo{{
+			Path:       "app-misc/foo/foo-1.0.0.ebuild",
+			Repository: config.RepoRef{Name: "overlay"},
+			Bin:        true,
+			License:    "MIT",
+		}},
+	}, testctx.WithVersion("1.0.0"))
+
+	ctx.Artifacts.Add(&artifact.Artifact{
+		Name:    "foo_1.0.0_linux_amd64_v1.tar.gz",
+		Path:    "v1.tar.gz",
+		Goos:    "linux",
+		Goarch:  "amd64",
+		Goamd64: "v1",
+		Type:    artifact.UploadableArchive,
+	})
+	ctx.Artifacts.Add(&artifact.Artifact{
+		Name:    "foo_1.0.0_linux_amd64_v2.tar.gz",
+		Path:    "v2.tar.gz",
+		Goos:    "linux",
+		Goarch:  "amd64",
+		Goamd64: "v2",
+		Type:    artifact.UploadableArchive,
+	})
+
+	cli := client.NewMock()
+	err := doRun(ctx, ctx.Config.Gentoos[0], cli)
+	require.ErrorContains(t, err, `multiple linux archives map to Gentoo architecture "amd64"`)
 }
 
 func TestGentooVersion(t *testing.T) {
