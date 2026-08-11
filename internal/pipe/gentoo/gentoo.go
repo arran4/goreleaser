@@ -367,7 +367,7 @@ func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient cl
 	lister, ok := repoClient.(client.DirectoryLister)
 	if ok {
 		names, err := lister.ListDir(ctx, stateRepo, dir)
-		if err != nil {
+		if err != nil && !errors.Is(err, client.ErrNotImplemented) {
 			return nil, err
 		}
 		for _, n := range names {
@@ -631,7 +631,7 @@ func (g *publishGroup) publish(ctx *context.Context, cl client.Client) error {
 		for _, f := range g.files {
 			if f.Delete {
 				if d, ok := repoClient.(client.FileDeleter); ok {
-					if err := d.DeleteFile(ctx, author, repo, f.Path, msg); err != nil {
+					if err := d.DeleteFile(ctx, author, repo, f.Path, msg); err != nil && !errors.Is(err, client.ErrNotImplemented) {
 						return err
 					}
 				}

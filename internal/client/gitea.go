@@ -25,12 +25,83 @@ type giteaClient struct {
 	client *gitea.Client
 }
 
-func (c *giteaClient) ListDir(_ *context.Context, _ Repo, _ string) ([]string, error) {
-	return nil, ErrNotImplemented
+func (c *giteaClient) ListDir(ctx *context.Context, repo Repo, dir string) ([]string, error) {
+	var branch string
+	var err error
+	if repo.Branch != "" {
+		branch = repo.Branch
+	} else {
+		branch, err = c.getDefaultBranch(ctx, repo)
+		if err != nil {
+			log.WithField("projectID", repo.String()).
+				WithError(err).
+				Warn("error checking for default branch, using server default")
+		}
+	}
+
+	contents, resp, err := giteaDo(ctx, func() ([]*gitea.ContentsResponse, *gitea.Response, error) {
+		return c.client.ListContents(repo.Owner, repo.Name, branch, dir)
+	})
+	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var names []string
+	for _, item := range contents {
+		if item != nil && item.Type == "file" {
+			names = append(names, item.Name)
+		}
+	}
+	return names, nil
 }
 
-func (c *giteaClient) DeleteFile(_ *context.Context, _ config.CommitAuthor, _ Repo, _ string, _ string) error {
-	return ErrNotImplemented
+func (c *giteaClient) DeleteFile(ctx *context.Context, commitAuthor config.CommitAuthor, repo Repo, path, message string) error {
+	var branch string
+	var err error
+	if repo.Branch != "" {
+		branch = repo.Branch
+	} else {
+		branch, err = c.getDefaultBranch(ctx, repo)
+		if err != nil {
+			log.WithField("projectID", repo.String()).
+				WithError(err).
+				Warn("error checking for default branch, using server default")
+		}
+	}
+
+	currentFile, getResp, err := giteaDo(ctx, func() (*gitea.ContentsResponse, *gitea.Response, error) {
+		return c.client.GetContents(repo.Owner, repo.Name, branch, path)
+	})
+	if err != nil {
+		if getResp != nil && getResp.StatusCode == http.StatusNotFound {
+			return nil
+		}
+		return err
+	}
+
+	fileOptions := gitea.FileOptions{
+		Message:    message,
+		BranchName: branch,
+		Author: gitea.Identity{
+			Name:  commitAuthor.Name,
+			Email: commitAuthor.Email,
+		},
+		Committer: gitea.Identity{
+			Name:  commitAuthor.Name,
+			Email: commitAuthor.Email,
+		},
+	}
+
+	_, _, err = giteaDo(ctx, func() (struct{}, *gitea.Response, error) {
+		resp, err := c.client.DeleteFile(repo.Owner, repo.Name, path, gitea.DeleteFileOptions{
+			FileOptions: fileOptions,
+			SHA:         currentFile.SHA,
+		})
+		return struct{}{}, resp, err
+	})
+	return err
 }
 
 var (
