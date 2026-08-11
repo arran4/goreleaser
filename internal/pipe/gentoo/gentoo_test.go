@@ -1526,6 +1526,40 @@ func TestMetaCache(t *testing.T) {
 		metaCacheAllowed := !settings.hasCacheFormatsConfigured || slices.Contains(settings.cacheFormats, "md5-dict") || slices.Contains(settings.cacheFormats, "md5-cache")
 		require.False(t, metaCacheAllowed)
 	})
+
+	t.Run("meta_cache filter properly applies with overlay path", func(t *testing.T) {
+		repoClient := client.NewMock()
+		repoClient.Files = map[string][]byte{
+			"metadata/layout.conf": []byte("cache-formats = pms\n"),
+		}
+
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
+
+		g := publishGroup{
+			cfg: config.Gentoo{
+				Name:        "foo",
+				Category:    "app-misc",
+				MetaCache:   true,
+				OverlayPath: "my-overlay",
+				CommitAuthor: config.CommitAuthor{
+					Name:  "Test",
+					Email: "test@test.com",
+				},
+				CommitMessageTemplate: "test",
+			},
+			files: []client.RepoFile{
+				{Path: "my-overlay/metadata/md5-cache/app-misc/foo-1.0.0", Content: []byte("cache")},
+				{Path: "my-overlay/app-misc/foo/foo-1.0.0.ebuild", Content: []byte("ebuild")},
+			},
+		}
+
+		err := g.publish(ctx, repoClient)
+		require.NoError(t, err)
+
+		require.Len(t, g.files, 2)
+		require.Equal(t, "my-overlay/app-misc/foo/foo-1.0.0.ebuild", g.files[0].Path)
+		require.Equal(t, "my-overlay/app-misc/foo/Manifest", g.files[1].Path)
+	})
 }
 
 func TestEbuildDeleter(t *testing.T) {

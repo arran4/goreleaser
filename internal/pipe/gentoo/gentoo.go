@@ -777,9 +777,14 @@ func (g *publishGroup) publish(ctx *context.Context, cl client.Client) error {
 		log.Warnf("gentoo.meta_cache is true for %q, but overlay metadata/layout.conf disables cache-formats", g.cfg.ID)
 	}
 
+	metaCachePrefix := "metadata/md5-cache/"
+	if g.cfg.OverlayPath != "" {
+		metaCachePrefix = filepath.ToSlash(filepath.Join(g.cfg.OverlayPath, "metadata", "md5-cache")) + "/"
+	}
+
 	var filteredFiles []client.RepoFile
 	for _, f := range g.files {
-		if strings.HasPrefix(filepath.ToSlash(f.Path), "metadata/md5-cache/") && !f.Delete && (!g.cfg.MetaCache || !metaCacheAllowed) {
+		if strings.HasPrefix(filepath.ToSlash(f.Path), metaCachePrefix) && !f.Delete && (!g.cfg.MetaCache || !metaCacheAllowed) {
 			continue
 		}
 		filteredFiles = append(filteredFiles, f)
