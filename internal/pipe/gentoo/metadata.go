@@ -112,8 +112,9 @@ func (m *gentooMetadata) AddUseFlags(flags []config.GentooUseFlag) {
 	for _, k := range configuredFlagNames {
 		v := configuredFlags[k]
 		exists := false
-		for _, ef := range m.Use.Flags {
+		for i, ef := range m.Use.Flags {
 			if ef.Name == k {
+				m.Use.Flags[i].Value = v
 				exists = true
 				break
 			}
