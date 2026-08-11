@@ -609,7 +609,7 @@ func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient cl
 	var deletedEbuilds []string
 	deleter := &ebuildDeleter{
 		dir:            dir,
-		category:       g.cfg.Category,
+		metaCacheDir:   metaCacheDir,
 		metaCacheFiles: metaCacheFiles,
 		files:          &g.files,
 		deletedEbuilds: &deletedEbuilds,

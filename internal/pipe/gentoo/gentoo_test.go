@@ -1406,6 +1406,7 @@ func TestEbuildDeleter(t *testing.T) {
 		var deleted []string
 		deleter := &ebuildDeleter{
 			dir:            "app-misc/foo-bin",
+			metaCacheDir:   "metadata/md5-cache/app-misc",
 			files:          &files,
 			deletedEbuilds: &deleted,
 		}
@@ -1424,7 +1425,7 @@ func TestEbuildDeleter(t *testing.T) {
 		var deleted []string
 		deleter := &ebuildDeleter{
 			dir:            "app-misc/foo-bin",
-			category:       "app-misc",
+			metaCacheDir:   "metadata/md5-cache/app-misc",
 			metaCacheFiles: map[string]struct{}{"foo-bin-1.0.0": {}},
 			files:          &files,
 			deletedEbuilds: &deleted,
