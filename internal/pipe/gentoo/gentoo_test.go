@@ -538,6 +538,53 @@ func TestHandleGentooManifestThin(t *testing.T) {
 	require.NotContains(t, manifestContent, "MISC metadata.xml")
 }
 
+func TestHandleGentooManifestThickExcludesMetaCache(t *testing.T) {
+	dist := t.TempDir()
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
+	cfg := config.Gentoo{
+		Category: "app-misc",
+		Name:     "foo",
+	}
+
+	artPath := filepath.Join(dist, "foo_1.0.0_linux_amd64.tar.gz")
+	require.NoError(t, os.WriteFile(artPath, []byte("test content"), 0o644))
+
+	ctx.Artifacts.Add(&artifact.Artifact{
+		Name:   "foo_1.0.0_linux_amd64.tar.gz",
+		Path:   artPath,
+		Goos:   "linux",
+		Goarch: "amd64",
+		Type:   artifact.UploadableArchive,
+	})
+
+	files := []client.RepoFile{
+		{Content: []byte("ebuild content"), Path: "app-misc/foo/foo-1.0.0.ebuild"},
+		{Content: []byte("<pkgmetadata></pkgmetadata>"), Path: "app-misc/foo/metadata.xml"},
+		{Content: []byte("cache content"), Path: "metadata/md5-cache/app-misc/foo-1.0.0"},
+	}
+
+	downloader := mockFileDownloader{
+		content: []byte("thin-manifests = false\n"),
+	}
+
+	err := handleGentooManifestAndMetadata(ctx, cfg, downloader, client.Repo{}, &files, nil)
+	require.NoError(t, err)
+
+	var manifestContent string
+	for _, f := range files {
+		if f.Path == "app-misc/foo/Manifest" {
+			manifestContent = string(f.Content)
+			break
+		}
+	}
+
+	require.NotEmpty(t, manifestContent)
+	require.Contains(t, manifestContent, "EBUILD foo-1.0.0.ebuild")
+	require.Contains(t, manifestContent, "MISC metadata.xml")
+	require.NotContains(t, manifestContent, "MISC foo-1.0.0")
+	require.NotContains(t, manifestContent, "md5-cache")
+}
+
 type mockFileDownloader struct {
 	client.Client
 	content  []byte
@@ -1261,7 +1308,8 @@ func TestMetaCache(t *testing.T) {
 		cacheFile := filepath.Join(dist, "gentoo", "default", "metadata", "md5-cache", "app-misc", "foo-bin-1.0.0")
 		content, err := os.ReadFile(cacheFile)
 		require.NoError(t, err)
-		require.Contains(t, string(content), "DEFINED_PHASES=")
+		require.Contains(t, string(content), "DEFINED_PHASES=install")
+		require.NotContains(t, string(content), "INHERITED=")
 		require.Contains(t, string(content), "IUSE=\n")
 		require.Contains(t, string(content), "_md5_=")
 	})
