@@ -75,12 +75,71 @@ func (c *gitlabClient) DownloadFile(ctx *context.Context, repo Repo, path string
 	return file, nil
 }
 
-func (c *gitlabClient) ListDir(_ *context.Context, _ Repo, _ string) ([]string, error) {
-	return nil, ErrNotImplemented
+func (c *gitlabClient) ListDir(ctx *context.Context, repo Repo, dir string) ([]string, error) {
+	if err := c.checkIsPrivateToken(); err != nil {
+		return nil, fmt.Errorf("list dir: %w", err)
+	}
+
+	branch := repo.Branch
+	if branch == "" {
+		var err error
+		branch, err = c.getDefaultBranch(ctx, repo)
+		if err != nil {
+			return nil, err
+		}
+	}
+	opts := &gitlab.ListTreeOptions{
+		Path: &dir,
+		Ref:  &branch,
+	}
+	tree, resp, err := gitlabDo(ctx, func() ([]*gitlab.TreeNode, *gitlab.Response, error) {
+		return c.client.Repositories.ListTree(repo.String(), opts)
+	})
+	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var names []string
+	for _, item := range tree {
+		if item != nil && item.Type == "blob" {
+			names = append(names, item.Name)
+		}
+	}
+	return names, nil
 }
 
-func (c *gitlabClient) DeleteFile(_ *context.Context, _ config.CommitAuthor, _ Repo, _ string, _ string) error {
-	return ErrNotImplemented
+func (c *gitlabClient) DeleteFile(ctx *context.Context, commitAuthor config.CommitAuthor, repo Repo, path, message string) error {
+	if err := c.checkIsPrivateToken(); err != nil {
+		return fmt.Errorf("delete file: %w", err)
+	}
+
+	branch := repo.Branch
+	if branch == "" {
+		var err error
+		branch, err = c.getDefaultBranch(ctx, repo)
+		if err != nil {
+			return err
+		}
+	}
+	opts := &gitlab.DeleteFileOptions{
+		Branch:        &branch,
+		AuthorEmail:   &commitAuthor.Email,
+		AuthorName:    &commitAuthor.Name,
+		CommitMessage: &message,
+	}
+	_, resp, err := gitlabDo(ctx, func() (struct{}, *gitlab.Response, error) {
+		resp, err := c.client.RepositoryFiles.DeleteFile(repo.String(), path, opts)
+		return struct{}{}, resp, err
+	})
+	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // newGitLab returns a gitlab client implementation.
