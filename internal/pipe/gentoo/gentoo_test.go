@@ -1756,6 +1756,21 @@ func TestGentooMetadata(t *testing.T) {
 		require.Contains(t, string(content), `<flag name="systemd">Enable systemd</flag>`)
 		require.Contains(t, string(content), `<bugs-to>https://bugs.example.com</bugs-to>`)
 	})
+
+	t.Run("AddUseFlags modifies existing", func(t *testing.T) {
+		var meta gentooMetadata
+		meta.AddUseFlags([]config.GentooUseFlag{
+			{Flag: "systemd", Description: "Enable systemd old"},
+		})
+		meta.AddUseFlags([]config.GentooUseFlag{
+			{Flag: "systemd", Description: "Enable systemd new"},
+		})
+
+		content, err := meta.Marshal()
+		require.NoError(t, err)
+		require.Contains(t, string(content), `<flag name="systemd">Enable systemd new</flag>`)
+		require.NotContains(t, string(content), `<flag name="systemd">Enable systemd old</flag>`)
+	})
 }
 
 func TestHandleGentooManifestAndMetadataMalformedXML(t *testing.T) {
