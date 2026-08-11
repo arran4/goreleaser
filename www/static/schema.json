@@ -1582,6 +1582,9 @@
 					"category": {
 						"type": "string"
 					},
+					"overlay_path": {
+						"type": "string"
+					},
 					"path": {
 						"type": "string"
 					},
@@ -1614,6 +1617,9 @@
 					},
 					"bin": {
 						"type": "boolean"
+					},
+					"type": {
+						"type": "string"
 					},
 					"keep_versions": {
 						"type": "integer"

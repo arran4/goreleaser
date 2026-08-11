@@ -50,8 +50,13 @@ func (Pipe) Default(ctx *context.Context) error {
 		if g.CommitMessageTemplate == "" {
 			g.CommitMessageTemplate = "{{ .ProjectName }}: bump to {{ .Tag }}"
 		}
-		if g.Bindir == "" {
+		if g.Type == "" {
+			g.Type = "bin"
+		}
+		if g.Type == "bin" && g.Bindir == "" {
 			g.Bindir = "/opt/bin"
+		} else if g.Bindir == "" {
+			g.Bindir = "/usr/bin"
 		}
 		if g.License == "" {
 			return errors.New("license is required")
@@ -74,13 +79,35 @@ func (Pipe) Default(ctx *context.Context) error {
 		if g.Name == "" {
 			g.Name = ctx.Config.ProjectName
 		}
-		if g.Path == "" {
-			g.Path = defaultPath(g.Name, g.Category)
-			if g.Category == "" {
-				log.Warnf("no gentoo category configured for %q; defaulting path to %q", g.Name, filepath.ToSlash(g.Path))
+
+		if g.OverlayPath == "" && g.Path == "" {
+			cat := g.Category
+			if cat == "" {
+				cat = "app-misc"
 			}
-		} else if !hasCategory(g.Path) {
-			log.Warnf("gentoo.path %q does not include a category/package path; Gentoo ebuild paths usually look like %q", g.Path, filepath.ToSlash(defaultPath(g.Name, g.Category)))
+			pkgName := g.Name
+			if g.Type == "bin" && !strings.HasSuffix(pkgName, "-bin") {
+				pkgName += "-bin"
+			}
+			g.OverlayPath = filepath.ToSlash(filepath.Join(cat, pkgName))
+		}
+
+		if g.Path == "" && g.OverlayPath != "" {
+			pkgName := filepath.Base(g.OverlayPath)
+			g.Path = filepath.ToSlash(filepath.Join(g.OverlayPath, fmt.Sprintf("%s-{{ .Version }}.ebuild", pkgName)))
+		} else if g.OverlayPath == "" && g.Path != "" {
+			g.OverlayPath = filepath.ToSlash(filepath.Dir(g.Path))
+		}
+
+		if g.Category == "" {
+			parts := strings.Split(filepath.ToSlash(filepath.Clean(g.OverlayPath)), "/")
+			if len(parts) >= 1 && parts[0] != "." && parts[0] != "" {
+				g.Category = parts[0]
+			}
+		}
+
+		if g.Category == "" {
+			log.Warnf("no gentoo category configured for %q; defaulting path to %q", g.Name, filepath.ToSlash(g.Path))
 		}
 		ids.Inc(g.ID)
 	}
@@ -106,11 +133,12 @@ func runAll(ctx *context.Context, cl client.ReleaseURLTemplater) error {
 
 func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplater) error {
 	tp := tmpl.New(ctx).WithExtraFields(tmpl.Fields{
-		"Version":  gentooVersion(ctx.Version),
-		"Name":     cfg.Name,
-		"Category": cfg.Category,
+		"GentooVersion": gentooVersion(ctx.Version),
+		"Version":       gentooVersion(ctx.Version),
+		"Name":          cfg.Name,
+		"Category":      cfg.Category,
 	})
-	if err := tp.ApplyAll(&cfg.Name, &cfg.Category, &cfg.Path, &cfg.Description, &cfg.Homepage, &cfg.BugsTo, &cfg.License); err != nil {
+	if err := tp.ApplyAll(&cfg.Name, &cfg.Category, &cfg.OverlayPath, &cfg.Path, &cfg.Description, &cfg.Homepage, &cfg.BugsTo, &cfg.License); err != nil {
 		return err
 	}
 	var err error
@@ -703,13 +731,6 @@ func (Pipe) Publish(ctx *context.Context) error {
 		}
 	}
 	return nil
-}
-
-func defaultPath(name, category string) string {
-	if category == "" {
-		category = "app-misc"
-	}
-	return filepath.Join(category, name+"-bin", fmt.Sprintf("%s-bin-{{ .Version }}.ebuild", name))
 }
 
 func hasCategory(path string) bool {

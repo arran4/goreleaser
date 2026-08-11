@@ -295,6 +295,7 @@ func TestDefaultSetsPath(t *testing.T) {
 	}, testctx.WithVersion("1.0.0"))
 	require.NoError(t, Pipe{}.Default(ctx))
 	require.Equal(t, filepath.Join("app-misc", "foo-bin", "foo-bin-{{ .Version }}.ebuild"), ctx.Config.Gentoos[0].Path)
+	require.Equal(t, filepath.Join("app-misc", "foo-bin"), ctx.Config.Gentoos[0].OverlayPath)
 }
 
 func TestDefaultSetsPathWithCategory(t *testing.T) {
@@ -308,6 +309,7 @@ func TestDefaultSetsPathWithCategory(t *testing.T) {
 	}, testctx.WithVersion("1.0.0"))
 	require.NoError(t, Pipe{}.Default(ctx))
 	require.Equal(t, filepath.Join("app-admin", "foo-bin", "foo-bin-{{ .Version }}.ebuild"), ctx.Config.Gentoos[0].Path)
+	require.Equal(t, filepath.Join("app-admin", "foo-bin"), ctx.Config.Gentoos[0].OverlayPath)
 }
 
 func TestPathWithCategoryAndNameTemplates(t *testing.T) {

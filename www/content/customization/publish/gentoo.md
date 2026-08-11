@@ -36,12 +36,23 @@ gentoo_overlays:
     # Templates: allowed.
     category: app-admin
 
-    # The ebuild's relative path within the repository.
-    # Must include category and package name (e.g. app-admin/myproject-bin/myproject-bin-{{ .Version }}.ebuild).
+    # The relative directory path of the package within the overlay repository.
+    # GoReleaser creates the package directory, Manifest, metadata.xml, and files/ under this path.
     #
-    # Default: "{{ .Category }}/{{ .Name }}-bin/{{ .Name }}-bin-{{ .Version }}.ebuild".
+    # Default: "{{ .Category }}/{{ .Name }}-bin" (for type "bin") or "{{ .Category }}/{{ .Name }}".
     # Templates: allowed.
-    path: "{{ .Category }}/{{ .Name }}-bin/{{ .Name }}-bin-{{ .Version }}.ebuild"
+    overlay_path: "app-admin/myproject-bin"
+
+    # The relative path of the ebuild file within the repository.
+    #
+    # Default: "{{ .OverlayPath }}/<package>-{{ .GentooVersion }}.ebuild".
+    # Templates: allowed (supports {{ .GentooVersion }} and {{ .Version }}).
+    path: "app-admin/myproject-bin/myproject-bin-{{ .GentooVersion }}.ebuild"
+
+    # The ebuild type variant.
+    #
+    # Default: "bin".
+    type: "bin"
 
     # Commit message template.
     #

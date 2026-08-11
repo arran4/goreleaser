@@ -476,6 +476,7 @@ type Gentoo struct {
 	IDs                      []string                 `yaml:"ids,omitempty" json:"ids,omitempty"`
 	Name                     string                   `yaml:"name,omitempty" json:"name,omitempty"`
 	Category                 string                   `yaml:"category,omitempty" json:"category,omitempty"`
+	OverlayPath              string                   `yaml:"overlay_path,omitempty" json:"overlay_path,omitempty"`
 	Path                     string                   `yaml:"path,omitempty" json:"path,omitempty"`
 	Repository               RepoRef                  `yaml:"repository,omitempty" json:"repository,omitempty"`
 	CommitAuthor             CommitAuthor             `yaml:"commit_author,omitempty" json:"commit_author,omitempty"`
@@ -486,6 +487,7 @@ type Gentoo struct {
 	Keywords                 StringArray              `yaml:"keywords,omitempty" json:"keywords,omitempty"`
 	Files                    []ExtraFile              `yaml:"files,omitempty" json:"files,omitempty"`
 	Bin                      bool                     `yaml:"bin" json:"bin"`
+	Type                     string                   `yaml:"type,omitempty" json:"type,omitempty"`
 	KeepVersions             int                      `yaml:"keep_versions,omitempty" json:"keep_versions,omitempty"`
 	ConflictResolution       ConflictResolution       `yaml:"conflict_resolution,omitempty" json:"conflict_resolution,omitempty" jsonschema:"enum=Fail,enum=Overwrite,enum=Revision"`
 	VersionRetentionStrategy VersionRetentionStrategy `yaml:"version_retention_strategy,omitempty" json:"version_retention_strategy,omitempty" jsonschema:"enum=keep_latest,enum=keep_prereleases"`
