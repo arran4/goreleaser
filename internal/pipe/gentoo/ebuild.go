@@ -315,6 +315,22 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 				return nil, fmt.Errorf("gentoo %s: src_id %q does not match a selected archive", sectionName, d.SrcID)
 			}
 
+			if len(keywords) > 0 {
+				for _, kw := range keywords {
+					found := false
+					for _, art := range matchingArches {
+						artKw, _ := gentooArch(art.Goarch)
+						if artKw == kw {
+							found = true
+							break
+						}
+					}
+					if !found {
+						return nil, fmt.Errorf("gentoo %s: src_id %q does not match a selected archive for archs %v", sectionName, d.SrcID, d.Archs)
+					}
+				}
+			}
+
 			firstWrappedIn := artifact.ExtraOr(*matchingArches[0], artifact.ExtraWrappedIn, "")
 			firstBins := artifact.ExtraOr(*matchingArches[0], artifact.ExtraBinaries, []string{})
 			for _, art := range matchingArches[1:] {

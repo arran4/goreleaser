@@ -2110,6 +2110,53 @@ func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
 		require.ErrorContains(t, err, `gentoo doexe: src_id "cgi_typo" does not match a selected archive`)
 	})
 
+	t.Run("missing archive for one of the requested architectures returns error", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "myapp",
+			Gentoos: []config.Gentoo{{
+				Category:    "app-misc",
+				Name:        "myapp",
+				Bin:         true,
+				License:     "MIT",
+				Description: "foo",
+				Doexe: []config.GentooInstallItem{{
+					SrcID: "partial",
+					Archs: []string{"amd64", "arm64"},
+				}},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "partial.tar.gz",
+			Path:   "dist/partial.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64", // Present for amd64, but missing for arm64
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:       "partial",
+				artifact.ExtraBinaries: []string{"myapp"},
+			},
+		})
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "other.tar.gz",
+			Path:   "dist/other.tar.gz",
+			Goos:   "linux",
+			Goarch: "arm64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:       "other",
+				artifact.ExtraBinaries: []string{"myapp"},
+			},
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
+		require.ErrorContains(t, err, `gentoo doexe: src_id "partial" does not match a selected archive for archs [amd64 arm64]`)
+	})
+
 	t.Run("multiple binaries with dst returns error", func(t *testing.T) {
 		dist := t.TempDir()
 		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
