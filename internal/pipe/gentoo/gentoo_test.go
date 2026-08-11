@@ -1464,18 +1464,6 @@ func TestGentooMetadata(t *testing.T) {
 	})
 }
 
-type mockDownloader struct {
-	client.Client
-	files map[string][]byte
-}
-
-func (m *mockDownloader) DownloadFile(_ *import_context.Context, _ client.Repo, path string) ([]byte, error) {
-	if content, ok := m.files[path]; ok {
-		return content, nil
-	}
-	return nil, client.ErrNotFound
-}
-
 func TestHandleGentooManifestAndMetadataMalformedXML(t *testing.T) {
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
 	cfg := config.Gentoo{
@@ -1483,11 +1471,9 @@ func TestHandleGentooManifestAndMetadataMalformedXML(t *testing.T) {
 		BugsTo: "https://bugs.example.com",
 	}
 
-	cli := &mockDownloader{
-		Client: client.NewMock(),
-		files: map[string][]byte{
-			"app-misc/foo/metadata.xml": []byte("<malformed xml"),
-		},
+	cli := client.NewMock()
+	cli.Files = map[string]string{
+		"app-misc/foo/metadata.xml": "<malformed xml",
 	}
 
 	var files []client.RepoFile
