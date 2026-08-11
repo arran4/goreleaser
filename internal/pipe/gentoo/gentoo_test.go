@@ -827,6 +827,7 @@ func TestTemplateScenarios(t *testing.T) {
 				Dosbin        []installItemData
 				Dosym         []installItemData
 				Systemd       []installItemData
+				Eclasses      []string
 			}{
 				InstallGroups: tc.installGroups,
 				Doexe:         tc.doexe,
@@ -1441,6 +1442,18 @@ func TestEbuildData(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, content, `DESCRIPTION="Foo package"`)
 		require.Contains(t, content, `HOMEPAGE="https://example.com"`)
+	})
+
+	t.Run("RenderEbuild with custom eclasses", func(t *testing.T) {
+		data := ebuildData{
+			Name:        "foo",
+			Description: "Foo package",
+			License:     "MIT",
+			Eclasses:    []string{"desktop", "systemd"},
+		}
+		content, err := data.RenderEbuild()
+		require.NoError(t, err)
+		require.Contains(t, content, "inherit desktop systemd")
 	})
 
 	t.Run("RenderMetaCache", func(t *testing.T) {

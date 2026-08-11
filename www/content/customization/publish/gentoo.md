@@ -117,7 +117,12 @@ gentoo_overlays:
     # metadata cache generation will be disabled automatically.
     #
     # Default: false.
-    meta_cache: true
+    # Additional Gentoo eclasses to inherit.
+    #
+    # Default: empty.
+    # eclasses:
+    #   - desktop
+    #   - systemd
 
     # Overrides for manifest hashes. Usually derived from metadata/layout.conf.
     #
