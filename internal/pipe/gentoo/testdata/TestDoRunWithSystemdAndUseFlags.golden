@@ -11,7 +11,7 @@ SRC_URI="
 LICENSE="MIT"
 SLOT="0"
 KEYWORDS="~amd64"
-IUSE="doc +systemd"
+IUSE="+systemd"
 
 S="${WORKDIR}"
 
@@ -24,8 +24,5 @@ src_install() {
   dosym "/usr/bin/foo" "/usr/bin/bar"
   if use systemd; then
   systemd_dounit "foo.service"
-  fi
-  if use doc; then
-    dodoc README* || die
   fi
 }

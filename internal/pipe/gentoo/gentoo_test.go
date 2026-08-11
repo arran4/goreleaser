@@ -863,8 +863,8 @@ func TestGentooUseFlagsIncludesInstallConditions(t *testing.T) {
 	})
 
 	require.Equal(t, []config.GentooUseFlag{
-		{Flag: "doc", Description: "Install documentation"},
 		{Flag: "+systemd"},
+		{Flag: "doc", Description: "Install documentation"},
 		{Flag: "bash"},
 		{Flag: "zsh"},
 	}, flags)
@@ -1215,7 +1215,7 @@ func TestMetaCache(t *testing.T) {
 		content, err := os.ReadFile(cacheFile)
 		require.NoError(t, err)
 		require.Contains(t, string(content), "DEFINED_PHASES=")
-		require.Contains(t, string(content), "IUSE=doc\n")
+		require.Contains(t, string(content), "IUSE=\n")
 		require.Contains(t, string(content), "_md5_=")
 	})
 

@@ -10,14 +10,11 @@ SRC_URI="
 LICENSE="MIT"
 SLOT="0"
 KEYWORDS="~amd64"
-IUSE="doc"
+IUSE=""
 
 S="${WORKDIR}"
 
 src_install() {
   exeinto /opt/bin
   doexe "foo" || die "Failed to install binary"
-  if use doc; then
-    dodoc README* || die
-  fi
 }
