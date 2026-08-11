@@ -1769,6 +1769,9 @@
 			},
 			"GentooInstallItem": {
 				"properties": {
+					"src_id": {
+						"type": "string"
+					},
 					"src": {
 						"type": "string"
 					},
@@ -1783,10 +1786,7 @@
 					}
 				},
 				"additionalProperties": false,
-				"type": "object",
-				"required": [
-					"src"
-				]
+				"type": "object"
 			},
 			"GentooMaintainer": {
 				"properties": {

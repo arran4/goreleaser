@@ -33,10 +33,14 @@ type installData struct {
 	Keywords []string
 }
 
+type archItem struct {
+	File string
+	URI  string
+}
+
 type archData struct {
 	Keyword string
-	File    string
-	URI     string
+	URIs    []archItem
 }
 
 type installGroup struct {
@@ -109,8 +113,12 @@ func (d ebuildData) SortedUseFlags() []string {
 func (d ebuildData) FormattedSrcURIs() []string {
 	var srcURIs []string
 	for _, art := range d.Archs {
-		if art.Keyword != "" && art.URI != "" {
-			srcURIs = append(srcURIs, fmt.Sprintf("%s? ( %s )", art.Keyword, art.URI))
+		if art.Keyword != "" && len(art.URIs) > 0 {
+			var files []string
+			for _, u := range art.URIs {
+				files = append(files, fmt.Sprintf("%s -> %s", u.URI, u.File))
+			}
+			srcURIs = append(srcURIs, fmt.Sprintf("%s? ( %s )", art.Keyword, strings.Join(files, " ")))
 		}
 	}
 	return srcURIs
@@ -250,15 +258,100 @@ func (v *extraFilesProcessor) validate(name, src string) error {
 func (v *extraFilesProcessor) buildInstallItems(cfgItems []config.GentooInstallItem) []installItemData {
 	var items []installItemData
 	for _, d := range cfgItems {
+		if d.SrcID != "" {
+			var matchingArches []*artifact.Artifact
+			for _, art := range v.arches {
+				if artifact.ExtraOr(*art, artifact.ExtraID, "default") == d.SrcID {
+					matchingArches = append(matchingArches, art)
+				}
+			}
+
+			if d.Src != "" {
+				srcPath := d.Src
+				if len(matchingArches) > 0 {
+					wrappedIn := artifact.ExtraOr(*matchingArches[0], artifact.ExtraWrappedIn, "")
+					if wrappedIn != "" {
+						srcPath = path.Join(wrappedIn, d.Src)
+					}
+				}
+				target := d.Dst
+				dir := path.Dir(filepath.ToSlash(d.Dst))
+				base := path.Base(filepath.ToSlash(d.Dst))
+				if dir == "." || dir == "" {
+					dir = ""
+				}
+				if base == "." || base == "" {
+					base = path.Base(filepath.ToSlash(srcPath))
+				}
+				items = append(items, installItemData{
+					Source: srcPath,
+					Target: target,
+					Dir:    dir,
+					Base:   base,
+					Use:    d.Use,
+				})
+			} else if len(matchingArches) > 0 {
+				bins := artifact.ExtraOr(*matchingArches[0], artifact.ExtraBinaries, []string{})
+				wrappedIn := artifact.ExtraOr(*matchingArches[0], artifact.ExtraWrappedIn, "")
+				if len(bins) == 0 {
+					bins = []string{v.cfg.Name}
+				}
+				for _, b := range bins {
+					sourcePath := b
+					if wrappedIn != "" {
+						sourcePath = path.Join(wrappedIn, b)
+					}
+					target := d.Dst
+					var dir, base string
+					if d.Dst == "" {
+						dir = ""
+						base = b
+					} else {
+						cleanedDst := filepath.ToSlash(d.Dst)
+						if path.Dir(cleanedDst) == "." || path.Dir(cleanedDst) == "" {
+							dir = ""
+							base = cleanedDst
+						} else {
+							dir = path.Dir(cleanedDst)
+							base = path.Base(cleanedDst)
+						}
+					}
+					items = append(items, installItemData{
+						Source: sourcePath,
+						Target: target,
+						Dir:    dir,
+						Base:   base,
+						Use:    d.Use,
+					})
+				}
+			}
+			continue
+		}
+
 		src := d.Src
 		if _, ok := v.extraFiles[d.Src]; ok {
 			src = "${FILESDIR}/" + strings.TrimPrefix(d.Src, "files/")
+		} else if len(v.arches) > 0 {
+			wrappedIn := artifact.ExtraOr(*v.arches[0], artifact.ExtraWrappedIn, "")
+			if wrappedIn != "" && !strings.HasPrefix(src, wrappedIn+"/") {
+				src = path.Join(wrappedIn, d.Src)
+			}
 		}
+
+		dir := path.Dir(filepath.ToSlash(d.Dst))
+		base := path.Base(filepath.ToSlash(d.Dst))
+		if dir == "." || dir == "" {
+			dir = ""
+		}
+		if base == "." || base == "" {
+			base = path.Base(filepath.ToSlash(src))
+		}
+
 		items = append(items, installItemData{
 			Source: src,
 			Target: d.Dst,
-			Dir:    path.Dir(filepath.ToSlash(d.Dst)),
-			Base:   path.Base(filepath.ToSlash(d.Dst)),
+			Dir:    dir,
+			Base:   base,
 			Use:    d.Use,
 		})
 	}

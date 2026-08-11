@@ -1351,15 +1351,15 @@ func TestEbuildData(t *testing.T) {
 	t.Run("FormattedSrcURIs", func(t *testing.T) {
 		data := ebuildData{
 			Archs: []archData{
-				{Keyword: "amd64", URI: "https://example.com/foo.tar.gz"},
-				{Keyword: "arm64", URI: "https://example.com/foo-arm64.tar.gz"},
-				{Keyword: "", URI: "invalid"},
+				{Keyword: "amd64", URIs: []archItem{{File: "foo.tar.gz", URI: "https://example.com/foo.tar.gz"}}},
+				{Keyword: "arm64", URIs: []archItem{{File: "foo-arm64.tar.gz", URI: "https://example.com/foo-arm64.tar.gz"}}},
+				{Keyword: "", URIs: []archItem{{File: "invalid", URI: "invalid"}}},
 			},
 		}
 		uris := data.FormattedSrcURIs()
 		require.Equal(t, []string{
-			"amd64? ( https://example.com/foo.tar.gz )",
-			"arm64? ( https://example.com/foo-arm64.tar.gz )",
+			"amd64? ( https://example.com/foo.tar.gz -> foo.tar.gz )",
+			"arm64? ( https://example.com/foo-arm64.tar.gz -> foo-arm64.tar.gz )",
 		}, uris)
 	})
 
@@ -1385,14 +1385,14 @@ func TestEbuildData(t *testing.T) {
 			Keywords:    "amd64",
 			UseFlags:    []config.GentooUseFlag{{Flag: "systemd"}},
 			Archs: []archData{
-				{Keyword: "amd64", URI: "https://example.com/foo.tar.gz"},
+				{Keyword: "amd64", URIs: []archItem{{File: "foo.tar.gz", URI: "https://example.com/foo.tar.gz"}}},
 			},
 		}
 		meta, err := data.RenderMetaCache("ebuild content sample")
 		require.NoError(t, err)
 		require.Contains(t, meta, "DESCRIPTION=Foo package")
 		require.Contains(t, meta, "IUSE=systemd")
-		require.Contains(t, meta, "SRC_URI=amd64? ( https://example.com/foo.tar.gz )")
+		require.Contains(t, meta, "SRC_URI=amd64? ( https://example.com/foo.tar.gz -> foo.tar.gz )")
 		require.Contains(t, meta, "_md5_=")
 	})
 }
@@ -1569,4 +1569,186 @@ func TestApplyVersionRetentionErrNotImplemented(t *testing.T) {
 	deleted, err := g.applyVersionRetention(ctx, cli, stateRepo)
 	require.NoError(t, err)
 	require.Nil(t, deleted)
+}
+
+func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
+	t.Run("src_id without src derives binary and suppresses default install", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "abcjustinrss",
+			Gentoos: []config.Gentoo{{
+				Category: "app-misc",
+				Name:     "abcjustinrss",
+				Bin:      true,
+				License:  "MIT",
+				UseFlags: []config.GentooUseFlag{
+					{Flag: "cgi", Description: "Install CGI executable"},
+				},
+				Doexe: []config.GentooInstallItem{
+					{
+						SrcID: "default",
+						Dst:   "/opt/bin/abcjustinrss",
+					},
+					{
+						SrcID: "cgi",
+						Dst:   "/var/www/cgi-bin/abcjustinrss",
+						Use:   []string{"cgi"},
+					},
+				},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "default_linux_amd64.tar.gz",
+			Path:   "dist/default_linux_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:       "default",
+				artifact.ExtraBinaries: []string{"abcjustinrss"},
+			},
+		})
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "cgi_linux_amd64.tar.gz",
+			Path:   "dist/cgi_linux_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:       "cgi",
+				artifact.ExtraBinaries: []string{"abcjustinrss-cgi"},
+			},
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+
+		ebuildPath := filepath.Join(dist, "gentoo", "default", "app-misc", "abcjustinrss-bin", "abcjustinrss-bin-1.0.0.ebuild")
+		content, err := os.ReadFile(ebuildPath)
+		require.NoError(t, err)
+		str := string(content)
+
+		require.Contains(t, str, "amd64? (")
+		require.Contains(t, str, "default_linux_amd64.tar.gz")
+		require.Contains(t, str, "cgi_linux_amd64.tar.gz")
+
+		require.Contains(t, str, `exeinto "/opt/bin"`)
+		require.Contains(t, str, `doexe "abcjustinrss"`)
+		require.Contains(t, str, `if use cgi; then`)
+		require.Contains(t, str, `exeinto "/var/www/cgi-bin"`)
+		require.Contains(t, str, `newexe "abcjustinrss-cgi" "abcjustinrss"`)
+	})
+
+	t.Run("src_id with src and partial suppression", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "myapp",
+			Gentoos: []config.Gentoo{{
+				Category: "app-misc",
+				Name:     "myapp",
+				IDs:      []string{"server", "client", "helper"},
+				Bin:      true,
+				License:  "MIT",
+				UseFlags: []config.GentooUseFlag{{Flag: "tools"}},
+				Doexe: []config.GentooInstallItem{{
+					SrcID: "helper",
+					Src:   "helpers/bar",
+					Dst:   "/opt/myapp/helper",
+					Use:   []string{"tools"},
+				}},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "server_linux_amd64.tar.gz",
+			Path:   "dist/server_linux_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:       "server",
+				artifact.ExtraBinaries: []string{"myapp-server"},
+			},
+		})
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "client_linux_amd64.tar.gz",
+			Path:   "dist/client_linux_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:       "client",
+				artifact.ExtraBinaries: []string{"myapp-client"},
+			},
+		})
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "helper_linux_amd64.tar.gz",
+			Path:   "dist/helper_linux_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:       "helper",
+				artifact.ExtraBinaries: []string{"myapp-helper"},
+			},
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+
+		ebuildPath := filepath.Join(dist, "gentoo", "default", "app-misc", "myapp-bin", "myapp-bin-1.0.0.ebuild")
+		content, err := os.ReadFile(ebuildPath)
+		require.NoError(t, err)
+		str := string(content)
+
+		require.Contains(t, str, `doexe "myapp-server"`)
+		require.Contains(t, str, `doexe "myapp-client"`)
+
+		require.NotContains(t, str, `doexe "myapp-helper"`)
+		require.Contains(t, str, `if use tools; then`)
+		require.Contains(t, str, `exeinto "/opt/myapp"`)
+		require.Contains(t, str, `newexe "helpers/bar" "helper"`)
+	})
+
+	t.Run("duplicate ID for same architecture is rejected", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "myapp",
+			Gentoos: []config.Gentoo{{
+				Category: "app-misc",
+				Name:     "myapp",
+				Bin:      true,
+				License:  "MIT",
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "server1.tar.gz",
+			Path:   "dist/server1.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID: "default",
+			},
+		})
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "server2.tar.gz",
+			Path:   "dist/server2.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID: "default",
+			},
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
+		require.ErrorContains(t, err, `multiple linux archives map to Gentoo architecture "amd64" for ID "default"`)
+	})
 }
