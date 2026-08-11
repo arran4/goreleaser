@@ -585,15 +585,6 @@ func TestHandleGentooManifestThickExcludesMetaCache(t *testing.T) {
 	require.NotContains(t, manifestContent, "md5-cache")
 }
 
-type mockFileLister struct {
-	client.Client
-	files []string
-}
-
-func (m mockFileLister) ListDir(_ *import_context.Context, _ client.Repo, _ string) ([]string, error) {
-	return m.files, nil
-}
-
 type mockFileDownloader struct {
 	client.Client
 	content  []byte
@@ -1338,12 +1329,13 @@ func TestConflictResolutionFail(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, groups, 1)
 
-		lister := mockFileLister{
-			Client: client.NewMock(),
-			files:  []string{"foo-bin-1.0.0.ebuild"},
+		clientMock := &client.Mock{
+			DirFiles: map[string][]string{
+				"app-misc/foo-bin": {"foo-bin-1.0.0.ebuild"},
+			},
 		}
 
-		require.NoError(t, groups[0].publish(ctx, lister))
+		require.NoError(t, groups[0].publish(ctx, clientMock))
 	})
 
 	t.Run("fails when generated ebuild filename already exists", func(t *testing.T) {
@@ -1378,12 +1370,13 @@ func TestConflictResolutionFail(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, groups, 1)
 
-		lister := mockFileLister{
-			Client: client.NewMock(),
-			files:  []string{"foo-bin-1.0.0.ebuild"},
+		clientMock := &client.Mock{
+			DirFiles: map[string][]string{
+				"app-misc/foo-bin": {"foo-bin-1.0.0.ebuild"},
+			},
 		}
 
-		err = groups[0].publish(ctx, lister)
+		err = groups[0].publish(ctx, clientMock)
 		require.EqualError(t, err, "ebuild foo-bin-1.0.0.ebuild already exists in app-misc/foo-bin")
 	})
 }
