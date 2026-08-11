@@ -114,8 +114,10 @@ gentoo_overlays:
 
     # Enable Gentoo metadata cache generation (metadata/md5-cache/<category>/<package>-<version>).
     # Experimental / best-effort option.
-    # Note: If the repository's metadata/layout.conf disables cache-formats (e.g. cache-formats is specified without md5-dict),
-    # metadata cache generation will be disabled automatically.
+    # Note: If the generated ebuild inherits an eclass (e.g. systemd), metadata cache generation for that
+    # ebuild is skipped with a warning because full eclass evaluation is outside GoReleaser's scope.
+    # If the repository's metadata/layout.conf disables cache-formats (e.g. cache-formats without md5-dict),
+    # metadata cache generation is also skipped.
     #
     # Default: false.
     # meta_cache: true
