@@ -2,6 +2,7 @@ package gentoo
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1750,5 +1751,26 @@ func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
 		require.NoError(t, Pipe{}.Default(ctx))
 		err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
 		require.ErrorContains(t, err, `multiple linux archives map to Gentoo architecture "amd64" for ID "default"`)
+	})
+
+	t.Run("collectSuppressedIDs handles all install item lists", func(t *testing.T) {
+		cfg := config.Gentoo{
+			Dobin:    []config.GentooInstallItem{{SrcID: "id1"}},
+			Doconfd:  []config.GentooInstallItem{{SrcID: "id2"}},
+			Doenvd:   []config.GentooInstallItem{{SrcID: "id3"}},
+			Doexe:    []config.GentooInstallItem{{SrcID: "id4"}},
+			Doheader: []config.GentooInstallItem{{SrcID: "id5"}},
+			Doinitd:  []config.GentooInstallItem{{SrcID: "id6"}},
+			Doins:    []config.GentooInstallItem{{SrcID: "id7"}},
+			Dosbin:   []config.GentooInstallItem{{SrcID: "id8"}},
+			Dosym:    []config.GentooInstallItem{{SrcID: "id9"}},
+			Systemd:  []config.GentooInstallItem{{SrcID: "id10"}},
+		}
+
+		suppressed := collectSuppressedIDs(cfg)
+		for i := 1; i <= 10; i++ {
+			require.True(t, suppressed[fmt.Sprintf("id%d", i)])
+		}
+		require.False(t, suppressed["unsuppressed_id"])
 	})
 }
