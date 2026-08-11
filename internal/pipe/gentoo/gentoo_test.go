@@ -1454,7 +1454,7 @@ func TestGentooMetadata(t *testing.T) {
 		meta.AddUseFlags([]config.GentooUseFlag{
 			{Flag: "systemd", Description: "Enable systemd"},
 		})
-		meta.SetUpstream("https://bugs.example.com", "https://example.com/doc")
+		meta.SetUpstream("https://bugs.example.com")
 
 		content, err := meta.Marshal()
 		require.NoError(t, err)
@@ -1462,6 +1462,37 @@ func TestGentooMetadata(t *testing.T) {
 		require.Contains(t, string(content), `<flag name="systemd">Enable systemd</flag>`)
 		require.Contains(t, string(content), `<bugs-to>https://bugs.example.com</bugs-to>`)
 	})
+}
+
+type mockDownloader struct {
+	client.Client
+	files map[string][]byte
+}
+
+func (m *mockDownloader) DownloadFile(_ *import_context.Context, _ client.Repo, path string) ([]byte, error) {
+	if content, ok := m.files[path]; ok {
+		return content, nil
+	}
+	return nil, client.ErrNotFound
+}
+
+func TestHandleGentooManifestAndMetadataMalformedXML(t *testing.T) {
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
+	cfg := config.Gentoo{
+		Path:   "app-misc/foo/foo-1.0.0.ebuild",
+		BugsTo: "https://bugs.example.com",
+	}
+
+	cli := &mockDownloader{
+		Client: client.NewMock(),
+		files: map[string][]byte{
+			"app-misc/foo/metadata.xml": []byte("<malformed xml"),
+		},
+	}
+
+	var files []client.RepoFile
+	err := handleGentooManifestAndMetadata(ctx, cfg, cli, client.Repo{}, &files, nil)
+	require.ErrorContains(t, err, "failed to parse metadata.xml")
 }
 
 func TestUpdateVersions(t *testing.T) {

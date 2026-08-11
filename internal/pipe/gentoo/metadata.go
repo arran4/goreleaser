@@ -125,19 +125,14 @@ func (m *gentooMetadata) AddUseFlags(flags []config.GentooUseFlag) {
 	}
 }
 
-func (m *gentooMetadata) SetUpstream(bugsTo, homepage string) {
-	if bugsTo == "" && homepage == "" {
+func (m *gentooMetadata) SetUpstream(bugsTo string) {
+	if bugsTo == "" {
 		return
 	}
 	if m.Upstream == nil {
 		m.Upstream = &gentooUpstream{}
 	}
-	if bugsTo != "" {
-		m.Upstream.BugsTo = bugsTo
-	}
-	if homepage != "" {
-		m.Upstream.Doc = homepage
-	}
+	m.Upstream.BugsTo = bugsTo
 }
 
 func (m *gentooMetadata) Marshal() ([]byte, error) {
@@ -279,12 +274,14 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 	metadataPath := path.Join(dir, "metadata.xml")
 	manifestPath := path.Join(dir, "Manifest")
 
-	if len(cfg.Maintainers) > 0 || cfg.BugsTo != "" || cfg.Homepage != "" || len(cfg.UseFlags) > 0 {
+	if len(cfg.Maintainers) > 0 || cfg.BugsTo != "" || len(cfg.UseFlags) > 0 {
 		meta := gentooMetadata{}
 		if dl, ok := repoClient.(client.FileDownloader); ok {
 			content, err := dl.DownloadFile(ctx, repo, metadataPath)
 			if err == nil {
-				_ = xml.Unmarshal(content, &meta)
+				if err := xml.Unmarshal(content, &meta); err != nil {
+					return fmt.Errorf("failed to parse metadata.xml: %w", err)
+				}
 			} else if !errors.Is(err, client.ErrNotFound) && !errors.Is(err, client.ErrNotImplemented) {
 				return fmt.Errorf("failed to download metadata.xml: %w", err)
 			}
@@ -294,7 +291,7 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 		if err := meta.AddMaintainers(cfg.Maintainers); err != nil {
 			return err
 		}
-		meta.SetUpstream(cfg.BugsTo, cfg.Homepage)
+		meta.SetUpstream(cfg.BugsTo)
 
 		content, err := meta.Marshal()
 		if err != nil {
