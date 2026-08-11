@@ -51,7 +51,7 @@ func (v *parsedGentooVersion) Compare(other *parsedGentooVersion) int {
 	}
 
 	maxLen := max(len(v.baseNum), len(other.baseNum))
-	for i := 0; i < maxLen; i++ {
+	for i := range maxLen {
 		var n1, n2 int
 		if i < len(v.baseNum) {
 			n1 = v.baseNum[i]
@@ -131,7 +131,7 @@ func compareGentooSuffixes(s1, s2 []gentooSuffix) int {
 	}
 
 	maxLen := max(len(s1), len(s2))
-	for i := 0; i < maxLen; i++ {
+	for i := range maxLen {
 		if i >= len(s1) {
 			if s2[i].kind == suffixP {
 				return -1

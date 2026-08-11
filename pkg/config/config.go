@@ -486,13 +486,12 @@ type Gentoo struct {
 	Keywords                 StringArray              `yaml:"keywords,omitempty" json:"keywords,omitempty"`
 	Files                    []ExtraFile              `yaml:"files,omitempty" json:"files,omitempty"`
 	Bin                      bool                     `yaml:"bin" json:"bin"`
-	Type                     string                   `yaml:"type,omitempty" json:"type,omitempty"`
 	KeepVersions             int                      `yaml:"keep_versions,omitempty" json:"keep_versions,omitempty"`
-	ConflictResolution       ConflictResolution       `yaml:"conflict_resolution,omitempty" json:"conflict_resolution,omitempty"`
-	VersionRetentionStrategy VersionRetentionStrategy `yaml:"version_retention_strategy,omitempty" json:"version_retention_strategy,omitempty"`
+	ConflictResolution       ConflictResolution       `yaml:"conflict_resolution,omitempty" json:"conflict_resolution,omitempty" jsonschema:"enum=Fail,enum=Overwrite,enum=Revision"`
+	VersionRetentionStrategy VersionRetentionStrategy `yaml:"version_retention_strategy,omitempty" json:"version_retention_strategy,omitempty" jsonschema:"enum=keep_latest,enum=keep_prereleases"`
 	SkipUpload               string                   `yaml:"skip_upload,omitempty" json:"skip_upload,omitempty" jsonschema:"oneof_type=string;boolean"`
 	SkipFilesValidation      bool                     `yaml:"skip_files_validation,omitempty" json:"skip_files_validation,omitempty"`
-	Bindir                   string                   `yaml:"bindir,omitempty" json:"bindir,omitempty"` // v2.8+
+	Bindir                   string                   `yaml:"bindir,omitempty" json:"bindir,omitempty"`
 	ManifestHashes           []string                 `yaml:"manifest_hashes,omitempty" json:"manifest_hashes,omitempty"`
 	ThinManifests            *bool                    `yaml:"thin_manifests,omitempty" json:"thin_manifests,omitempty"`
 	MetaCache                bool                     `yaml:"meta_cache,omitempty" json:"meta_cache,omitempty"`

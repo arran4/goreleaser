@@ -39,7 +39,7 @@ gentoo_overlays:
     # The ebuild's relative path within the repository.
     # Must include category and package name (e.g. app-admin/myproject-bin/myproject-bin-{{ .Version }}.ebuild).
     #
-    # Default: "{{ .Category }}/{{ .Name }}-bin/{{ .Name }}-bin-{{ .Version }}.ebuild" (for type "bin") or "{{ .Category }}/{{ .Name }}/{{ .Name }}-{{ .Version }}.ebuild".
+    # Default: "{{ .Category }}/{{ .Name }}-bin/{{ .Name }}-bin-{{ .Version }}.ebuild".
     # Templates: allowed.
     path: "{{ .Category }}/{{ .Name }}-bin/{{ .Name }}-bin-{{ .Version }}.ebuild"
 
@@ -72,15 +72,6 @@ gentoo_overlays:
     # Required: must be true.
     bin: true
 
-    # The ebuild type variant.
-    #
-    # When set to "bin" (default), GoReleaser automatically appends a `-bin` suffix
-    # to the default package name and ebuild path (e.g. `app-misc/myproject-bin/myproject-bin-{{ .Version }}.ebuild`),
-    # and sets the default binary installation directory `bindir` to `/opt/bin`.
-    #
-    # Default: "bin".
-    type: "bin"
-
     # Keep past versions that were created by GoReleaser.
     # Requires an active SCM integration (e.g. GitHub/GitLab token) to work properly.
     #
@@ -92,7 +83,7 @@ gentoo_overlays:
     # When "Revision" is specified, the ebuild revision (e.g. from 1.0.0 to 1.0.0-r1)
     # will automatically bump when the content of the ebuild or its auxiliary files changes materially.
     #
-    # Default: Overwrite (the pre-existing behavior).
+    # Default: Revision.
     conflict_resolution: Revision
 
     # Retention strategy for old ebuild versions.
@@ -113,7 +104,7 @@ gentoo_overlays:
 
     # Destination binary installation directory.
     #
-    # Default: "/opt/bin" if type is "bin", otherwise "/usr/bin".
+    # Default: "/opt/bin".
     bindir: "/usr/bin"
 
     # Enable Gentoo metadata cache generation (metadata/md5-cache/<category>/<package>-<version>).
@@ -147,20 +138,17 @@ gentoo_overlays:
 
     # Project homepage.
     #
-    # Default: inferred from global metadata.
     # Templates: allowed.
     homepage: "https://myproject.com"
 
     # The ebuild's description.
     #
-    # Default: inferred from global metadata.
     # Templates: allowed.
     description: "Software to create fast and easy drum rolls."
 
     # The ebuild's license.
     #
     # Required.
-    # Default: inferred from global metadata.
     # Templates: allowed.
     license: "MIT"
 
@@ -247,7 +235,7 @@ gentoo_overlays:
 
 ## Limitations
 
-- The target repository needs to have standard Gentoo repo files like `metadata/layout.conf` or they will be generated implicitly.
+- If the target repository does not contain `metadata/layout.conf`, GoReleaser falls back to internal defaults (such as `BLAKE2B` and `SHA512` manifest hashes).
 
 {{% g_include file="includes/prs.md" %}}
 

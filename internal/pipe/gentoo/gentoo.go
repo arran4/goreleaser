@@ -50,20 +50,17 @@ func (Pipe) Default(ctx *context.Context) error {
 		if g.CommitMessageTemplate == "" {
 			g.CommitMessageTemplate = "{{ .ProjectName }}: bump to {{ .Tag }}"
 		}
-		if g.Type == "bin" || g.Type == "" {
-			if g.Bindir == "" {
-				g.Bindir = "/opt/bin"
-			}
-		} else {
-			if g.Bindir == "" {
-				g.Bindir = "/usr/bin"
-			}
-		}
-		if g.Type == "" {
-			g.Type = "bin"
+		if g.Bindir == "" {
+			g.Bindir = "/opt/bin"
 		}
 		if g.License == "" {
 			return errors.New("license is required")
+		}
+		if g.ConflictResolution != "" &&
+			g.ConflictResolution != config.ConflictResolutionFail &&
+			g.ConflictResolution != config.ConflictResolutionOverwrite &&
+			g.ConflictResolution != config.ConflictResolutionRevision {
+			return fmt.Errorf("conflict_resolution %q is not valid, must be one of [Fail, Overwrite, Revision]", g.ConflictResolution)
 		}
 		if g.KeepVersions < 0 {
 			return errors.New("keep_versions must be greater than or equal to 0")
@@ -78,12 +75,12 @@ func (Pipe) Default(ctx *context.Context) error {
 			g.Name = ctx.Config.ProjectName
 		}
 		if g.Path == "" {
-			g.Path = defaultPath(g.Name, g.Category, g.Type)
+			g.Path = defaultPath(g.Name, g.Category)
 			if g.Category == "" {
 				log.Warnf("no gentoo category configured for %q; defaulting path to %q", g.Name, filepath.ToSlash(g.Path))
 			}
 		} else if !hasCategory(g.Path) {
-			log.Warnf("gentoo.path %q does not include a category/package path; Gentoo ebuild paths usually look like %q", g.Path, filepath.ToSlash(defaultPath(g.Name, g.Category, g.Type)))
+			log.Warnf("gentoo.path %q does not include a category/package path; Gentoo ebuild paths usually look like %q", g.Path, filepath.ToSlash(defaultPath(g.Name, g.Category)))
 		}
 		ids.Inc(g.ID)
 	}
@@ -708,15 +705,11 @@ func (Pipe) Publish(ctx *context.Context) error {
 	return nil
 }
 
-func defaultPath(name, category, typ string) string {
+func defaultPath(name, category string) string {
 	if category == "" {
 		category = "app-misc"
 	}
-	suffix := ""
-	if typ == "bin" {
-		suffix = "-bin"
-	}
-	return filepath.Join(category, name+suffix, fmt.Sprintf("%s%s-{{ .Version }}.ebuild", name, suffix))
+	return filepath.Join(category, name+"-bin", fmt.Sprintf("%s-bin-{{ .Version }}.ebuild", name))
 }
 
 func hasCategory(path string) bool {
