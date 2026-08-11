@@ -145,7 +145,6 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		return errors.New("no linux archives found")
 	}
 
-	var archInfos []archData
 	keywordSet := map[string]struct{}{}
 
 	uriTemplate, err := cl.ReleaseURLTemplate(ctx)
@@ -153,7 +152,10 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		return err
 	}
 
-	seenGentooArch := make(map[string]*artifact.Artifact)
+	archMap := make(map[string][]archItem)
+	seenArchID := make(map[string]map[string]*artifact.Artifact)
+	var keywordsOrder []string
+
 	for _, art := range arches {
 		url, err := tmpl.New(ctx).WithArtifact(art).Apply(uriTemplate)
 		if err != nil {
@@ -163,16 +165,28 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		if err != nil {
 			return err
 		}
-		if prev, exists := seenGentooArch[kw]; exists {
-			return fmt.Errorf("multiple linux archives map to Gentoo architecture %q (%s and %s); please filter artifacts or use ids", kw, prev.Name, art.Name)
+		id := artifact.ExtraOr(*art, artifact.ExtraID, "default")
+		if seenArchID[kw] == nil {
+			seenArchID[kw] = make(map[string]*artifact.Artifact)
+			keywordsOrder = append(keywordsOrder, kw)
 		}
-		seenGentooArch[kw] = art
-		archInfos = append(archInfos, archData{
-			Keyword: kw,
-			File:    art.Name,
-			URI:     url,
+		if prev, exists := seenArchID[kw][id]; exists {
+			return fmt.Errorf("multiple linux archives map to Gentoo architecture %q for ID %q (%s and %s); please filter artifacts", kw, id, prev.Name, art.Name)
+		}
+		seenArchID[kw][id] = art
+		archMap[kw] = append(archMap[kw], archItem{
+			File: art.Name,
+			URI:  url,
 		})
 		keywordSet["~"+kw] = struct{}{}
+	}
+
+	var archInfos []archData
+	for _, kw := range keywordsOrder {
+		archInfos = append(archInfos, archData{
+			Keyword: kw,
+			URIs:    archMap[kw],
+		})
 	}
 
 	keywords := cfg.Keywords
@@ -194,17 +208,63 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 	}
 	slices.Sort(keywordsList)
 
-	installGroups := []installGroup{
-		{
-			Keywords: keywordsList,
-			Installs: []installData{
-				{
-					Source:   cfg.Name,
-					Target:   cfg.Name,
-					Keywords: keywordsList,
-				},
-			},
-		},
+	suppressedIDs := collectSuppressedIDs(cfg)
+	installByKw := make(map[string][]installData)
+
+	for _, art := range arches {
+		artID := artifact.ExtraOr(*art, artifact.ExtraID, "default")
+		if suppressedIDs[artID] {
+			continue
+		}
+		kw, _ := gentooArch(art.Goarch)
+		bins := artifact.ExtraOr(*art, artifact.ExtraBinaries, []string{})
+		wrappedIn := artifact.ExtraOr(*art, artifact.ExtraWrappedIn, "")
+		if len(bins) == 0 {
+			bins = []string{cfg.Name}
+		}
+		for _, b := range bins {
+			sourcePath := b
+			if wrappedIn != "" {
+				sourcePath = filepath.ToSlash(filepath.Join(wrappedIn, b))
+			}
+			targetName := filepath.Base(b)
+			installByKw[kw] = append(installByKw[kw], installData{
+				Source:   sourcePath,
+				Target:   targetName,
+				Keywords: []string{kw},
+			})
+		}
+	}
+
+	var installGroups []installGroup
+	if len(installByKw) > 0 {
+		groupMap := make(map[string][]string)
+		installItemsMap := make(map[string][]installData)
+
+		for _, kw := range keywordsList {
+			installs := installByKw[kw]
+			if len(installs) == 0 {
+				continue
+			}
+			var keyParts []string
+			for _, inst := range installs {
+				keyParts = append(keyParts, inst.Source+":"+inst.Target)
+			}
+			groupKey := strings.Join(keyParts, ";")
+			groupMap[groupKey] = append(groupMap[groupKey], kw)
+			installItemsMap[groupKey] = installs
+		}
+
+		for groupKey, kws := range groupMap {
+			installs := installItemsMap[groupKey]
+			for i := range installs {
+				installs[i].Keywords = kws
+			}
+			installGroups = append(installGroups, installGroup{
+				Keywords: kws,
+				Installs: installs,
+			})
+		}
 	}
 
 	extraInstall, err := tp.Apply(cfg.ExtraInstall)
@@ -702,6 +762,28 @@ func (Pipe) Publish(ctx *context.Context) error {
 		}
 	}
 	return nil
+}
+
+func collectSuppressedIDs(cfg config.Gentoo) map[string]bool {
+	suppressed := make(map[string]bool)
+	add := func(items []config.GentooInstallItem) {
+		for _, item := range items {
+			if item.SrcID != "" {
+				suppressed[item.SrcID] = true
+			}
+		}
+	}
+	add(cfg.Dobin)
+	add(cfg.Doconfd)
+	add(cfg.Doenvd)
+	add(cfg.Doexe)
+	add(cfg.Doheader)
+	add(cfg.Doinitd)
+	add(cfg.Doins)
+	add(cfg.Dosbin)
+	add(cfg.Dosym)
+	add(cfg.Systemd)
+	return suppressed
 }
 
 func packageDir(cfg config.Gentoo) string {

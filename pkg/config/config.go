@@ -521,9 +521,10 @@ type GentooUseFlag struct {
 }
 
 type GentooInstallItem struct {
-	Src string   `yaml:"src" json:"src"`
-	Dst string   `yaml:"dst,omitempty" json:"dst,omitempty"`
-	Use []string `yaml:"use,omitempty" json:"use,omitempty"`
+	SrcID string   `yaml:"src_id,omitempty" json:"src_id,omitempty"`
+	Src   string   `yaml:"src,omitempty" json:"src,omitempty"`
+	Dst   string   `yaml:"dst,omitempty" json:"dst,omitempty"`
+	Use   []string `yaml:"use,omitempty" json:"use,omitempty"`
 }
 
 type GentooMaintainer struct {

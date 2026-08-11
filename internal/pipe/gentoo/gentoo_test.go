@@ -2,6 +2,7 @@ package gentoo
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1351,15 +1352,15 @@ func TestEbuildData(t *testing.T) {
 	t.Run("FormattedSrcURIs", func(t *testing.T) {
 		data := ebuildData{
 			Archs: []archData{
-				{Keyword: "amd64", URI: "https://example.com/foo.tar.gz"},
-				{Keyword: "arm64", URI: "https://example.com/foo-arm64.tar.gz"},
-				{Keyword: "", URI: "invalid"},
+				{Keyword: "amd64", URIs: []archItem{{File: "foo.tar.gz", URI: "https://example.com/foo.tar.gz"}}},
+				{Keyword: "arm64", URIs: []archItem{{File: "foo-arm64.tar.gz", URI: "https://example.com/foo-arm64.tar.gz"}}},
+				{Keyword: "", URIs: []archItem{{File: "invalid", URI: "invalid"}}},
 			},
 		}
 		uris := data.FormattedSrcURIs()
 		require.Equal(t, []string{
-			"amd64? ( https://example.com/foo.tar.gz )",
-			"arm64? ( https://example.com/foo-arm64.tar.gz )",
+			"amd64? ( https://example.com/foo.tar.gz -> foo.tar.gz )",
+			"arm64? ( https://example.com/foo-arm64.tar.gz -> foo-arm64.tar.gz )",
 		}, uris)
 	})
 
@@ -1385,14 +1386,14 @@ func TestEbuildData(t *testing.T) {
 			Keywords:    "amd64",
 			UseFlags:    []config.GentooUseFlag{{Flag: "systemd"}},
 			Archs: []archData{
-				{Keyword: "amd64", URI: "https://example.com/foo.tar.gz"},
+				{Keyword: "amd64", URIs: []archItem{{File: "foo.tar.gz", URI: "https://example.com/foo.tar.gz"}}},
 			},
 		}
 		meta, err := data.RenderMetaCache("ebuild content sample")
 		require.NoError(t, err)
 		require.Contains(t, meta, "DESCRIPTION=Foo package")
 		require.Contains(t, meta, "IUSE=systemd")
-		require.Contains(t, meta, "SRC_URI=amd64? ( https://example.com/foo.tar.gz )")
+		require.Contains(t, meta, "SRC_URI=amd64? ( https://example.com/foo.tar.gz -> foo.tar.gz )")
 		require.Contains(t, meta, "_md5_=")
 	})
 }
@@ -1569,4 +1570,207 @@ func TestApplyVersionRetentionErrNotImplemented(t *testing.T) {
 	deleted, err := g.applyVersionRetention(ctx, cli, stateRepo)
 	require.NoError(t, err)
 	require.Nil(t, deleted)
+}
+
+func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
+	t.Run("src_id without src derives binary and suppresses default install", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "program1",
+			Gentoos: []config.Gentoo{{
+				Category: "app-misc",
+				Name:     "program1",
+				Bin:      true,
+				License:  "MIT",
+				UseFlags: []config.GentooUseFlag{
+					{Flag: "plugin", Description: "Install plugin executable"},
+				},
+				Doexe: []config.GentooInstallItem{
+					{
+						SrcID: "default",
+						Dst:   "/opt/bin/program1",
+					},
+					{
+						SrcID: "plugin",
+						Dst:   "/var/www/cgi-bin/program2",
+						Use:   []string{"plugin"},
+					},
+				},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "default_linux_amd64.tar.gz",
+			Path:   "dist/default_linux_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:       "default",
+				artifact.ExtraBinaries: []string{"program1"},
+			},
+		})
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "plugin_linux_amd64.tar.gz",
+			Path:   "dist/plugin_linux_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:       "plugin",
+				artifact.ExtraBinaries: []string{"program2-bin"},
+			},
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+
+		ebuildPath := filepath.Join(dist, "gentoo", "default", "app-misc", "program1-bin", "program1-bin-1.0.0.ebuild")
+		content, err := os.ReadFile(ebuildPath)
+		require.NoError(t, err)
+		str := string(content)
+
+		require.Contains(t, str, "amd64? (")
+		require.Contains(t, str, "default_linux_amd64.tar.gz")
+		require.Contains(t, str, "plugin_linux_amd64.tar.gz")
+
+		require.Contains(t, str, `exeinto "/opt/bin"`)
+		require.Contains(t, str, `doexe "program1"`)
+		require.Contains(t, str, `if use plugin; then`)
+		require.Contains(t, str, `exeinto "/var/www/cgi-bin"`)
+		require.Contains(t, str, `newexe "program2-bin" "program2"`)
+	})
+
+	t.Run("src_id with src and partial suppression", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "myapp",
+			Gentoos: []config.Gentoo{{
+				Category: "app-misc",
+				Name:     "myapp",
+				IDs:      []string{"server", "client", "helper"},
+				Bin:      true,
+				License:  "MIT",
+				UseFlags: []config.GentooUseFlag{{Flag: "tools"}},
+				Doexe: []config.GentooInstallItem{{
+					SrcID: "helper",
+					Src:   "helpers/bar",
+					Dst:   "/opt/myapp/helper",
+					Use:   []string{"tools"},
+				}},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "server_linux_amd64.tar.gz",
+			Path:   "dist/server_linux_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:       "server",
+				artifact.ExtraBinaries: []string{"myapp-server"},
+			},
+		})
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "client_linux_amd64.tar.gz",
+			Path:   "dist/client_linux_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:       "client",
+				artifact.ExtraBinaries: []string{"myapp-client"},
+			},
+		})
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "helper_linux_amd64.tar.gz",
+			Path:   "dist/helper_linux_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:       "helper",
+				artifact.ExtraBinaries: []string{"myapp-helper"},
+			},
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+
+		ebuildPath := filepath.Join(dist, "gentoo", "default", "app-misc", "myapp-bin", "myapp-bin-1.0.0.ebuild")
+		content, err := os.ReadFile(ebuildPath)
+		require.NoError(t, err)
+		str := string(content)
+
+		require.Contains(t, str, `doexe "myapp-server"`)
+		require.Contains(t, str, `doexe "myapp-client"`)
+
+		require.NotContains(t, str, `doexe "myapp-helper"`)
+		require.Contains(t, str, `if use tools; then`)
+		require.Contains(t, str, `exeinto "/opt/myapp"`)
+		require.Contains(t, str, `newexe "helpers/bar" "helper"`)
+	})
+
+	t.Run("duplicate ID for same architecture is rejected", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "myapp",
+			Gentoos: []config.Gentoo{{
+				Category: "app-misc",
+				Name:     "myapp",
+				Bin:      true,
+				License:  "MIT",
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "server1.tar.gz",
+			Path:   "dist/server1.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID: "default",
+			},
+		})
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "server2.tar.gz",
+			Path:   "dist/server2.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID: "default",
+			},
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
+		require.ErrorContains(t, err, `multiple linux archives map to Gentoo architecture "amd64" for ID "default"`)
+	})
+
+	t.Run("collectSuppressedIDs handles all install item lists", func(t *testing.T) {
+		cfg := config.Gentoo{
+			Dobin:    []config.GentooInstallItem{{SrcID: "id1"}},
+			Doconfd:  []config.GentooInstallItem{{SrcID: "id2"}},
+			Doenvd:   []config.GentooInstallItem{{SrcID: "id3"}},
+			Doexe:    []config.GentooInstallItem{{SrcID: "id4"}},
+			Doheader: []config.GentooInstallItem{{SrcID: "id5"}},
+			Doinitd:  []config.GentooInstallItem{{SrcID: "id6"}},
+			Doins:    []config.GentooInstallItem{{SrcID: "id7"}},
+			Dosbin:   []config.GentooInstallItem{{SrcID: "id8"}},
+			Dosym:    []config.GentooInstallItem{{SrcID: "id9"}},
+			Systemd:  []config.GentooInstallItem{{SrcID: "id10"}},
+		}
+
+		suppressed := collectSuppressedIDs(cfg)
+		for i := 1; i <= 10; i++ {
+			require.True(t, suppressed[fmt.Sprintf("id%d", i)])
+		}
+		require.False(t, suppressed["unsuppressed_id"])
+	})
 }

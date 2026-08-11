@@ -9,7 +9,15 @@ DESCRIPTION="{{ .Description }}"
 HOMEPAGE="{{ .Homepage }}"
 SRC_URI="
 {{- range .Archs }}
-  {{ .Keyword }}? ( {{ .URI }} -> {{ .File }} )
+{{- if eq (len .URIs) 1 }}
+  {{ .Keyword }}? ( {{ (index .URIs 0).URI }} -> {{ (index .URIs 0).File }} )
+{{- else }}
+  {{ .Keyword }}? (
+{{- range .URIs }}
+    {{ .URI }} -> {{ .File }}
+{{- end }}
+  )
+{{- end }}
 {{- end }}
 "
 
@@ -129,7 +137,11 @@ src_install() {
 {{- template "use_start" .Use }}
 {{- if .Target }}
   insinto "{{ .Dir }}"
+  {{- if eq .Source .Base }}
+  doins "{{ .Source }}"
+  {{- else }}
   newins "{{ .Source }}" "{{ .Base }}"
+  {{- end }}
 {{- else }}
   insinto /
   doins "{{ .Source }}"
