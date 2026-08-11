@@ -835,7 +835,7 @@ func TestTemplateScenarios(t *testing.T) {
 				UseFlags:      gentooUseFlags(config.Gentoo{}),
 			}
 			var buf bytes.Buffer
-			err := template.Must(template.New("ebuild").Parse(tmplStr)).Execute(&buf, data)
+			err := template.Must(template.New("ebuild").Funcs(template.FuncMap{"escape": shellEscape}).Parse(tmplStr)).Execute(&buf, data)
 			require.NoError(t, err)
 			golden.RequireEqualTxt(t, buf.Bytes())
 		})
