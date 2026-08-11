@@ -46,7 +46,7 @@ type Mock struct {
 	OpenedPullRequest    bool
 	SyncedFork           bool
 	DeletedFiles         []string
-	Files                map[string]string
+	Files                map[string][]byte
 }
 
 func (c *Mock) SyncFork(_ *context.Context, _ Repo, _ Repo) error {
@@ -141,7 +141,7 @@ func (c *Mock) Upload(_ *context.Context, _ string, artifact *artifact.Artifact)
 func (c *Mock) DownloadFile(_ *context.Context, _ Repo, path string) ([]byte, error) {
 	if c.Files != nil {
 		if content, ok := c.Files[path]; ok {
-			return []byte(content), nil
+			return content, nil
 		}
 	}
 	return nil, ErrNotFound

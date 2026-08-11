@@ -1472,8 +1472,8 @@ func TestHandleGentooManifestAndMetadataMalformedXML(t *testing.T) {
 	}
 
 	cli := client.NewMock()
-	cli.Files = map[string]string{
-		"app-misc/foo/metadata.xml": "<malformed xml",
+	cli.Files = map[string][]byte{
+		"app-misc/foo/metadata.xml": []byte("<malformed xml"),
 	}
 
 	var files []client.RepoFile
