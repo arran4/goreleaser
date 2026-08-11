@@ -1664,9 +1664,6 @@
 					"thin_manifests": {
 						"type": "boolean"
 					},
-					"meta_cache": {
-						"type": "boolean"
-					},
 					"extra_install": {
 						"type": "string"
 					},

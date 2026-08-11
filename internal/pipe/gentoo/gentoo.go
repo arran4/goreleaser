@@ -24,7 +24,6 @@ import (
 const (
 	ebuildExtra     = "GentooConfig"
 	ebuildPathExtra = "GentooPath"
-	ebuildMetaCache = "GentooMetaCache"
 )
 
 // Pipe builds and publishes gentoo ebuilds.
@@ -390,33 +389,6 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		},
 	})
 
-	if cfg.MetaCache {
-		pkgVer := strings.TrimSuffix(filepath.Base(path), ".ebuild")
-		metaCachePath := filepath.ToSlash(filepath.Join("metadata", "md5-cache", cfg.Category, pkgVer))
-		if cfg.OverlayPath != "" {
-			metaCachePath = filepath.ToSlash(filepath.Join(cfg.OverlayPath, metaCachePath))
-		}
-		metaCacheDistPath := filepath.Join(ctx.Config.Dist, "gentoo", cfg.ID, metaCachePath)
-
-		metaContent := generateMetaCacheContent(data, content)
-		if err := os.MkdirAll(filepath.Dir(metaCacheDistPath), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(metaCacheDistPath, []byte(metaContent), 0o644); err != nil {
-			return err
-		}
-		ctx.Artifacts.Add(&artifact.Artifact{
-			Name: pkgVer,
-			Path: metaCacheDistPath,
-			Type: artifact.GentooFile,
-			Extra: map[string]any{
-				ebuildExtra:     cfg,
-				ebuildPathExtra: metaCachePath,
-				ebuildMetaCache: true,
-			},
-		})
-	}
-
 	return nil
 }
 
@@ -553,26 +525,9 @@ func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient cl
 		}
 	}
 
-	metaCacheDir := filepath.ToSlash(filepath.Join("metadata", "md5-cache", g.cfg.Category))
-	if g.cfg.OverlayPath != "" {
-		metaCacheDir = filepath.ToSlash(filepath.Join(g.cfg.OverlayPath, metaCacheDir))
-	}
-	metaCacheFiles := map[string]struct{}{}
-	if g.cfg.MetaCache {
-		cacheNames, err := lister.ListDir(ctx, stateRepo, metaCacheDir)
-		if err != nil && !errors.Is(err, client.ErrNotFound) && !errors.Is(err, client.ErrNotImplemented) {
-			return nil, err
-		}
-		for _, name := range cacheNames {
-			metaCacheFiles[name] = struct{}{}
-		}
-	}
-
 	var deletedEbuilds []string
 	deleter := &ebuildDeleter{
 		dir:            dir,
-		category:       g.cfg.Category,
-		metaCacheFiles: metaCacheFiles,
 		files:          &g.files,
 		deletedEbuilds: &deletedEbuilds,
 	}
@@ -714,28 +669,6 @@ func (g *publishGroup) publish(ctx *context.Context, cl client.Client) error {
 		stateRepo.Branch = g.cfg.Repository.PullRequest.Base.Branch
 	}
 
-	settings, err := loadOverlaySettings(ctx, g.cfg, repoClient, stateRepo)
-	if err != nil {
-		return err
-	}
-
-	metaCacheAllowed := true
-	if settings.hasCacheFormatsConfigured {
-		metaCacheAllowed = slices.Contains(settings.cacheFormats, "md5-dict") || slices.Contains(settings.cacheFormats, "md5-cache")
-	}
-
-	if g.cfg.MetaCache && !metaCacheAllowed {
-		log.Warnf("gentoo.meta_cache is true for %q, but overlay metadata/layout.conf disables cache-formats", g.cfg.ID)
-	}
-
-	var filteredFiles []client.RepoFile
-	for _, f := range g.files {
-		if strings.HasPrefix(filepath.ToSlash(f.Path), "metadata/md5-cache/") && !f.Delete && (!g.cfg.MetaCache || !metaCacheAllowed) {
-			continue
-		}
-		filteredFiles = append(filteredFiles, f)
-	}
-	g.files = filteredFiles
 	if err := handleGentooManifestAndMetadata(ctx, g.cfg, repoClient, stateRepo, &g.files, deletedEbuilds); err != nil {
 		return err
 	}

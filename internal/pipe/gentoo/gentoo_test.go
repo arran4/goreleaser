@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"text/template"
@@ -536,53 +535,6 @@ func TestHandleGentooManifestThin(t *testing.T) {
 	require.NotContains(t, manifestContent, "EBUILD foo-1.0.0.ebuild")
 	require.NotContains(t, manifestContent, "AUX foo.patch")
 	require.NotContains(t, manifestContent, "MISC metadata.xml")
-}
-
-func TestHandleGentooManifestThickExcludesMetaCache(t *testing.T) {
-	dist := t.TempDir()
-	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
-	cfg := config.Gentoo{
-		Category: "app-misc",
-		Name:     "foo",
-	}
-
-	artPath := filepath.Join(dist, "foo_1.0.0_linux_amd64.tar.gz")
-	require.NoError(t, os.WriteFile(artPath, []byte("test content"), 0o644))
-
-	ctx.Artifacts.Add(&artifact.Artifact{
-		Name:   "foo_1.0.0_linux_amd64.tar.gz",
-		Path:   artPath,
-		Goos:   "linux",
-		Goarch: "amd64",
-		Type:   artifact.UploadableArchive,
-	})
-
-	files := []client.RepoFile{
-		{Content: []byte("ebuild content"), Path: "app-misc/foo/foo-1.0.0.ebuild"},
-		{Content: []byte("<pkgmetadata></pkgmetadata>"), Path: "app-misc/foo/metadata.xml"},
-		{Content: []byte("cache content"), Path: "metadata/md5-cache/app-misc/foo-1.0.0"},
-	}
-
-	downloader := mockFileDownloader{
-		content: []byte("thin-manifests = false\n"),
-	}
-
-	err := handleGentooManifestAndMetadata(ctx, cfg, downloader, client.Repo{}, &files, nil)
-	require.NoError(t, err)
-
-	var manifestContent string
-	for _, f := range files {
-		if f.Path == "app-misc/foo/Manifest" {
-			manifestContent = string(f.Content)
-			break
-		}
-	}
-
-	require.NotEmpty(t, manifestContent)
-	require.Contains(t, manifestContent, "EBUILD foo-1.0.0.ebuild")
-	require.Contains(t, manifestContent, "MISC metadata.xml")
-	require.NotContains(t, manifestContent, "MISC foo-1.0.0")
-	require.NotContains(t, manifestContent, "md5-cache")
 }
 
 type mockFileDownloader struct {
@@ -1295,53 +1247,8 @@ func TestSkipUpload(t *testing.T) {
 	})
 }
 
-func TestMetaCache(t *testing.T) {
-	t.Run("meta_cache enabled", func(t *testing.T) {
-		dist := t.TempDir()
-		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
-			Dist:        dist,
-			ProjectName: "foo",
-			Gentoos: []config.Gentoo{{
-				Category:  "app-misc",
-				Name:      "foo",
-				Bin:       true,
-				License:   "MIT",
-				MetaCache: true,
-			}},
-		}, testctx.WithVersion("1.0.0"))
-		ctx.Artifacts.Add(&artifact.Artifact{
-			Name:   "foo_1.0.0_linux_amd64.tar.gz",
-			Path:   "dist/foo_1.0.0_linux_amd64.tar.gz",
-			Goos:   "linux",
-			Goarch: "amd64",
-			Type:   artifact.UploadableArchive,
-		})
-		require.NoError(t, Pipe{}.Default(ctx))
-		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
-		cacheFile := filepath.Join(dist, "gentoo", "default", "metadata", "md5-cache", "app-misc", "foo-bin-1.0.0")
-		content, err := os.ReadFile(cacheFile)
-		require.NoError(t, err)
-		require.Contains(t, string(content), "DEFINED_PHASES=install")
-		require.NotContains(t, string(content), "INHERITED=")
-		require.Contains(t, string(content), "IUSE=\n")
-		require.Contains(t, string(content), "_md5_=")
-	})
-
-	t.Run("meta_cache disabled by layout.conf", func(t *testing.T) {
-		repoClient := mockFileDownloader{
-			content: []byte("cache-formats = pms\n"),
-		}
-		settings, err := loadOverlaySettings(testctx.Wrap(t.Context()), config.Gentoo{
-			MetaCache: true,
-		}, repoClient, client.Repo{})
-		require.NoError(t, err)
-		metaCacheAllowed := !settings.hasCacheFormatsConfigured || slices.Contains(settings.cacheFormats, "md5-dict") || slices.Contains(settings.cacheFormats, "md5-cache")
-		require.False(t, metaCacheAllowed)
-	})
-}
-
 func TestEbuildDeleter(t *testing.T) {
-	t.Run("does not delete a missing metadata cache entry", func(t *testing.T) {
+	t.Run("deletes ebuild file", func(t *testing.T) {
 		var files []client.RepoFile
 		var deleted []string
 		deleter := &ebuildDeleter{
@@ -1357,28 +1264,6 @@ func TestEbuildDeleter(t *testing.T) {
 			Path:   "app-misc/foo-bin/foo-bin-1.0.0.ebuild",
 			Delete: true,
 		}}, files)
-	})
-
-	t.Run("deletes an existing metadata cache entry", func(t *testing.T) {
-		var files []client.RepoFile
-		var deleted []string
-		deleter := &ebuildDeleter{
-			dir:            "app-misc/foo-bin",
-			category:       "app-misc",
-			metaCacheFiles: map[string]struct{}{"foo-bin-1.0.0": {}},
-			files:          &files,
-			deletedEbuilds: &deleted,
-		}
-
-		deleter.Delete("foo-bin-1.0.0.ebuild")
-
-		require.Len(t, deleted, 1)
-		require.Equal(t, "foo-bin-1.0.0.ebuild", deleted[0])
-		require.Len(t, files, 2)
-		require.Equal(t, "app-misc/foo-bin/foo-bin-1.0.0.ebuild", files[0].Path)
-		require.True(t, files[0].Delete)
-		require.Equal(t, "metadata/md5-cache/app-misc/foo-bin-1.0.0", files[1].Path)
-		require.True(t, files[1].Delete)
 	})
 }
 
@@ -1441,25 +1326,6 @@ func TestEbuildData(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, content, `DESCRIPTION="Foo package"`)
 		require.Contains(t, content, `HOMEPAGE="https://example.com"`)
-	})
-
-	t.Run("RenderMetaCache", func(t *testing.T) {
-		data := ebuildData{
-			Description: "Foo package",
-			Homepage:    "https://example.com",
-			License:     "MIT",
-			Keywords:    "amd64",
-			UseFlags:    []config.GentooUseFlag{{Flag: "systemd"}},
-			Archs: []archData{
-				{Keyword: "amd64", URIs: []archItem{{File: "foo.tar.gz", URI: "https://example.com/foo.tar.gz"}}},
-			},
-		}
-		meta, err := data.RenderMetaCache("ebuild content sample")
-		require.NoError(t, err)
-		require.Contains(t, meta, "DESCRIPTION=Foo package")
-		require.Contains(t, meta, "IUSE=systemd")
-		require.Contains(t, meta, "SRC_URI=amd64? ( https://example.com/foo.tar.gz -> foo.tar.gz )")
-		require.Contains(t, meta, "_md5_=")
 	})
 }
 

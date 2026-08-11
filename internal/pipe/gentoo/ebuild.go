@@ -2,9 +2,7 @@ package gentoo
 
 import (
 	"bytes"
-	"crypto/md5"
 	_ "embed"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -23,9 +21,6 @@ import (
 
 //go:embed templates/ebuild.tmpl
 var ebuildTemplate string
-
-//go:embed templates/md5-cache.tmpl
-var metaCacheTemplate string
 
 type installData struct {
 	Source   string
@@ -128,43 +123,6 @@ func (d ebuildData) FormattedSrcURIs() []string {
 		}
 	}
 	return srcURIs
-}
-
-func (d ebuildData) RenderMetaCache(ebuildContent string) (string, error) {
-	h := md5.Sum([]byte(ebuildContent))
-	md5Hex := hex.EncodeToString(h[:])
-
-	tmplData := struct {
-		Description string
-		Homepage    string
-		IUSE        string
-		Keywords    string
-		License     string
-		SrcURI      string
-		MD5         string
-	}{
-		Description: d.Description,
-		Homepage:    d.Homepage,
-		IUSE:        strings.Join(d.SortedUseFlags(), " "),
-		Keywords:    d.Keywords,
-		License:     d.License,
-		SrcURI:      strings.Join(d.FormattedSrcURIs(), " "),
-		MD5:         md5Hex,
-	}
-
-	var buf bytes.Buffer
-	if err := template.Must(template.New("md5-cache").Parse(metaCacheTemplate)).Execute(&buf, tmplData); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
-}
-
-func generateMetaCacheContent(data ebuildData, ebuildContent string) string {
-	meta, err := data.RenderMetaCache(ebuildContent)
-	if err != nil {
-		return ""
-	}
-	return meta
 }
 
 type extraFilesProcessor struct {

@@ -271,8 +271,6 @@ func getVersionBucket(v *parsedGentooVersion) string {
 
 type ebuildDeleter struct {
 	dir            string
-	category       string
-	metaCacheFiles map[string]struct{}
 	files          *[]client.RepoFile
 	deletedEbuilds *[]string
 }
@@ -280,12 +278,6 @@ type ebuildDeleter struct {
 func (d *ebuildDeleter) Delete(ebuildName string) {
 	*d.files = append(*d.files, client.RepoFile{Path: path.Join(d.dir, ebuildName), Delete: true})
 	*d.deletedEbuilds = append(*d.deletedEbuilds, ebuildName)
-	md5Name := strings.TrimSuffix(ebuildName, ".ebuild")
-	if _, ok := d.metaCacheFiles[md5Name]; !ok {
-		return
-	}
-	md5CachePath := path.Join("metadata", "md5-cache", d.category, md5Name)
-	*d.files = append(*d.files, client.RepoFile{Path: md5CachePath, Delete: true})
 }
 
 func countNewEbuilds(ebuilds, newFiles []string, bucket func(string) string) map[string]int {
