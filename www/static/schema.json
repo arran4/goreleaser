@@ -1585,9 +1585,6 @@
 					"overlay_path": {
 						"type": "string"
 					},
-					"path": {
-						"type": "string"
-					},
 					"repository": {
 						"$ref": "#/$defs/RepoRef"
 					},

@@ -43,13 +43,6 @@ gentoo_overlays:
     # Templates: allowed.
     overlay_path: "subfolder"
 
-    # The relative path of the ebuild file within the repository.
-    # Ebuild paths are automatically generated from Category, Name, Type, and Version.
-    #
-    # Default: "[{{ .OverlayPath }}/]{{ .Category }}/<package>/<package>-{{ .GentooVersion }}.ebuild".
-    # Templates: allowed (supports {{ .GentooVersion }} and {{ .Version }}).
-    path: "app-admin/myproject-bin/myproject-bin-{{ .GentooVersion }}.ebuild"
-
     # The ebuild type variant.
     #
     # Default: "bin".

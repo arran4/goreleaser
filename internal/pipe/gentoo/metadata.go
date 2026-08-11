@@ -269,7 +269,7 @@ func generateManifestLine(recordType, filename, pathStr string, content []byte, 
 }
 
 func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, repoClient client.Client, repo client.Repo, files *[]client.RepoFile, deletedEbuilds []string) error {
-	dir := filepath.ToSlash(filepath.Dir(cfg.Path))
+	dir := packageDir(cfg)
 
 	metadataPath := path.Join(dir, "metadata.xml")
 	manifestPath := path.Join(dir, "Manifest")

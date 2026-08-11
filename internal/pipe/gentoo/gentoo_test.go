@@ -104,7 +104,6 @@ func TestDoRunRejectsRawBinaries(t *testing.T) {
 		ProjectName: "foo",
 		Gentoos: []config.Gentoo{{
 			Name:    "foo",
-			Path:    "app-misc/foo/foo-1.0.0.ebuild",
 			License: "MIT",
 		}},
 	})
@@ -118,18 +117,6 @@ func TestDoRunRejectsRawBinaries(t *testing.T) {
 
 	err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
 	require.EqualError(t, err, "no linux archives found")
-}
-
-func TestDoRunRejectsUnsafeEbuildPath(t *testing.T) {
-	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
-		Gentoos: []config.Gentoo{{
-			Path:    "../../outside/foo.ebuild",
-			License: "MIT",
-		}},
-	})
-
-	err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
-	require.EqualError(t, err, `path "../../outside/foo.ebuild" must be a relative category/package/file.ebuild path`)
 }
 
 func TestDoRunCustomBindir(t *testing.T) {
@@ -294,8 +281,10 @@ func TestDefaultSetsPath(t *testing.T) {
 		}},
 	}, testctx.WithVersion("1.0.0"))
 	require.NoError(t, Pipe{}.Default(ctx))
-	require.Equal(t, filepath.Join("app-misc", "foo-bin", "foo-bin-{{ .Version }}.ebuild"), ctx.Config.Gentoos[0].Path)
+	require.Equal(t, "foo", ctx.Config.Gentoos[0].Name)
+	require.Equal(t, "app-misc", ctx.Config.Gentoos[0].Category)
 	require.Empty(t, ctx.Config.Gentoos[0].OverlayPath)
+	require.Equal(t, "app-misc/foo-bin/foo-bin-1.0.0.ebuild", ebuildRelPath(ctx, ctx.Config.Gentoos[0]))
 }
 
 func TestDefaultSetsPathWithCategory(t *testing.T) {
@@ -308,8 +297,9 @@ func TestDefaultSetsPathWithCategory(t *testing.T) {
 		}},
 	}, testctx.WithVersion("1.0.0"))
 	require.NoError(t, Pipe{}.Default(ctx))
-	require.Equal(t, filepath.Join("app-admin", "foo-bin", "foo-bin-{{ .Version }}.ebuild"), ctx.Config.Gentoos[0].Path)
+	require.Equal(t, "app-admin", ctx.Config.Gentoos[0].Category)
 	require.Empty(t, ctx.Config.Gentoos[0].OverlayPath)
+	require.Equal(t, "app-admin/foo-bin/foo-bin-1.0.0.ebuild", ebuildRelPath(ctx, ctx.Config.Gentoos[0]))
 }
 
 func TestDefaultWithOverlayPath(t *testing.T) {
@@ -323,8 +313,8 @@ func TestDefaultWithOverlayPath(t *testing.T) {
 		}},
 	}, testctx.WithVersion("1.0.0"))
 	require.NoError(t, Pipe{}.Default(ctx))
-	require.Equal(t, filepath.Join("my-prefix", "app-admin", "foo-bin", "foo-bin-{{ .Version }}.ebuild"), ctx.Config.Gentoos[0].Path)
 	require.Equal(t, "my-prefix", ctx.Config.Gentoos[0].OverlayPath)
+	require.Equal(t, "my-prefix/app-admin/foo-bin/foo-bin-1.0.0.ebuild", ebuildRelPath(ctx, ctx.Config.Gentoos[0]))
 }
 
 func TestPathWithCategoryAndNameTemplates(t *testing.T) {
@@ -335,7 +325,6 @@ func TestPathWithCategoryAndNameTemplates(t *testing.T) {
 		Gentoos: []config.Gentoo{{
 			Category: "app-admin",
 			Name:     "bar",
-			Path:     "{{ .Category }}/{{ .Name }}-bin/{{ .Name }}-bin-{{ .Version }}.ebuild",
 			Bin:      true,
 			License:  "MIT",
 		}},
@@ -402,28 +391,14 @@ func TestArtifactDerivedKeywords(t *testing.T) {
 	require.Contains(t, string(content), `KEYWORDS="~amd64 ~arm64"`)
 }
 
-func TestDoRunRequiresPath(t *testing.T) {
-	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
-		Dist:        t.TempDir(),
-		ProjectName: "foo",
-		Gentoos: []config.Gentoo{{
-			Repository: config.RepoRef{Name: "overlay"},
-			Bin:        true,
-		}},
-	}, testctx.WithVersion("1.0.0"))
-
-	err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
-	require.EqualError(t, err, "path is required and must include the category/package ebuild path")
-}
-
 func TestHandleGentooManifestAndMetadata(t *testing.T) {
 	dist := t.TempDir()
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
 		ProjectName: "foo",
 	})
 	cfg := config.Gentoo{
-		Name: "foo",
-		Path: "app-misc/foo/foo-1.0.0.ebuild",
+		Category: "app-misc",
+		Name:     "foo",
 		Maintainers: []config.GentooMaintainer{
 			{Name: "M", Email: "m@m.com"},
 		},
@@ -469,8 +444,8 @@ func TestHandleGentooManifestAndMetadata(t *testing.T) {
 func TestHandleGentooMetadata(t *testing.T) {
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
 	cfg := config.Gentoo{
+		Category: "app-misc",
 		Name:     "goreleaser-gentoo-smoke",
-		Path:     "app-misc/goreleaser-gentoo-smoke-bin/goreleaser-gentoo-smoke-bin-1.0.0.ebuild",
 		Homepage: "https://github.com/arran4/goreleaser-gentoo-smoke",
 		UseFlags: []config.GentooUseFlag{{
 			Flag:        "systemd",
@@ -488,8 +463,8 @@ func TestHandleGentooManifestThick(t *testing.T) {
 	dist := t.TempDir()
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
 	cfg := config.Gentoo{
-		Name: "foo",
-		Path: "app-misc/foo/foo-1.0.0.ebuild",
+		Category: "app-misc",
+		Name:     "foo",
 	}
 
 	artPath := filepath.Join(dist, "foo_1.0.0_linux_amd64.tar.gz")
@@ -526,8 +501,8 @@ func TestHandleGentooManifestThin(t *testing.T) {
 	dist := t.TempDir()
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
 	cfg := config.Gentoo{
-		Name: "foo",
-		Path: "app-misc/foo/foo-1.0.0.ebuild",
+		Category: "app-misc",
+		Name:     "foo",
 	}
 
 	artPath := filepath.Join(dist, "foo_1.0.0_linux_amd64.tar.gz")
@@ -581,8 +556,8 @@ func (m mockFileDownloader) DownloadFile(_ *import_context.Context, _ client.Rep
 func TestHandleGentooManifestPreservesAuxWithDynamicReference(t *testing.T) {
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
 	cfg := config.Gentoo{
-		Name: "foo",
-		Path: "app-misc/foo/foo-1.0.0.ebuild",
+		Category: "app-misc",
+		Name:     "foo",
 	}
 	downloader := mockFileDownloader{
 		content: []byte("thin-manifests = false\n"),
@@ -617,8 +592,8 @@ func TestHandleGentooManifestUnsupportedHash(t *testing.T) {
 	dist := t.TempDir()
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
 	cfg := config.Gentoo{
-		Name: "foo",
-		Path: "app-misc/foo/foo-1.0.0.ebuild",
+		Category: "app-misc",
+		Name:     "foo",
 	}
 
 	artPath := filepath.Join(dist, "foo_1.0.0_linux_amd64.tar.gz")
@@ -647,8 +622,7 @@ func TestDoRunByIDs(t *testing.T) {
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
 		Dist: folder,
 		Gentoos: []config.Gentoo{{
-			IDs:  []string{"foo"},
-			Path: "app-misc/foo/foo.ebuild",
+			IDs: []string{"foo"},
 		}},
 	})
 	ctx.Artifacts.Add(&artifact.Artifact{
@@ -994,7 +968,8 @@ func TestDoRunUnsupportedGentooArch(t *testing.T) {
 		Dist:        dist,
 		ProjectName: "foo",
 		Gentoos: []config.Gentoo{{
-			Path:       "app-misc/foo/foo-1.0.0.ebuild",
+			Category:   "app-misc",
+			Name:       "foo",
 			Repository: config.RepoRef{Name: "overlay"},
 			Bin:        true,
 			License:    "MIT",
@@ -1020,7 +995,8 @@ func TestDoRunDuplicateGentooArch(t *testing.T) {
 		Dist:        dist,
 		ProjectName: "foo",
 		Gentoos: []config.Gentoo{{
-			Path:       "app-misc/foo/foo-1.0.0.ebuild",
+			Category:   "app-misc",
+			Name:       "foo",
 			Repository: config.RepoRef{Name: "overlay"},
 			Bin:        true,
 			License:    "MIT",
@@ -1267,7 +1243,6 @@ func TestMetaCache(t *testing.T) {
 			Gentoos: []config.Gentoo{{
 				Category:  "app-misc",
 				Name:      "foo",
-				Path:      "app-misc/foo-bin/foo-bin-{{ .Version }}.ebuild",
 				Bin:       true,
 				License:   "MIT",
 				MetaCache: true,
@@ -1433,7 +1408,8 @@ func TestInstallExtraFiles(t *testing.T) {
 	})
 
 	ef := newExtraFilesProcessor(config.Gentoo{
-		Path: "app-misc/foo/foo-1.0.0.ebuild",
+		Category: "app-misc",
+		Name:     "foo",
 	}, nil, map[string]string{
 		"files/foo.conf": srcFile,
 	})
@@ -1484,8 +1460,9 @@ func TestGentooMetadata(t *testing.T) {
 func TestHandleGentooManifestAndMetadataMalformedXML(t *testing.T) {
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
 	cfg := config.Gentoo{
-		Path:   "app-misc/foo/foo-1.0.0.ebuild",
-		BugsTo: "https://bugs.example.com",
+		Category: "app-misc",
+		Name:     "foo",
+		BugsTo:   "https://bugs.example.com",
 	}
 
 	cli := client.NewMock()
@@ -1581,7 +1558,8 @@ func TestApplyVersionRetentionErrNotImplemented(t *testing.T) {
 	cli := client.NewMock() // Mock returns ErrNotImplemented for ListDir
 	g := &publishGroup{
 		cfg: config.Gentoo{
-			Path: "app-misc/foo/foo-1.0.0.ebuild",
+			Category: "app-misc",
+			Name:     "foo",
 		},
 		files: []client.RepoFile{
 			{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\n")},
