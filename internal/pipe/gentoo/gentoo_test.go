@@ -132,7 +132,7 @@ func TestDoRunRejectsUnsafeEbuildPath(t *testing.T) {
 	})
 
 	err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
-	require.EqualError(t, err, `gentoo.path "../../outside/foo.ebuild" must be a relative category/package/file.ebuild path`)
+	require.EqualError(t, err, `path "../../outside/foo.ebuild" must be a relative category/package/file.ebuild path`)
 }
 
 func TestDoRunCustomBindir(t *testing.T) {
@@ -347,7 +347,7 @@ func TestDefaultRequiresLicense(t *testing.T) {
 			Bin: true,
 		}},
 	}, testctx.WithVersion("1.0.0"))
-	require.EqualError(t, Pipe{}.Default(ctx), "gentoo.license is required")
+	require.EqualError(t, Pipe{}.Default(ctx), "license is required")
 }
 
 func TestArtifactDerivedKeywords(t *testing.T) {
@@ -399,7 +399,7 @@ func TestDoRunRequiresPath(t *testing.T) {
 	}, testctx.WithVersion("1.0.0"))
 
 	err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
-	require.EqualError(t, err, "gentoo.path is required and must include the category/package ebuild path")
+	require.EqualError(t, err, "path is required and must include the category/package ebuild path")
 }
 
 func TestHandleGentooManifestAndMetadata(t *testing.T) {
@@ -1030,7 +1030,7 @@ func TestDefaultValidation(t *testing.T) {
 			KeepVersions: -1,
 		},
 	}
-	require.ErrorContains(t, Pipe{}.Default(ctx), "gentoo.keep_versions must be greater than or equal to 0")
+	require.ErrorContains(t, Pipe{}.Default(ctx), "keep_versions must be greater than or equal to 0")
 
 	ctx.Config.Gentoos = []config.Gentoo{
 		{
@@ -1040,7 +1040,7 @@ func TestDefaultValidation(t *testing.T) {
 			VersionRetentionStrategy: "invalid",
 		},
 	}
-	require.ErrorContains(t, Pipe{}.Default(ctx), "gentoo.version_retention_strategy \"invalid\" is not valid, must be one of [keep_latest, keep_prereleases]")
+	require.ErrorContains(t, Pipe{}.Default(ctx), "version_retention_strategy \"invalid\" is not valid, must be one of [keep_latest, keep_prereleases]")
 
 	ctx.Config.Gentoos = []config.Gentoo{
 		{
@@ -1050,7 +1050,7 @@ func TestDefaultValidation(t *testing.T) {
 			VersionRetentionStrategy: "",
 		},
 	}
-	require.ErrorContains(t, Pipe{}.Default(ctx), "gentoo.version_retention_strategy must be provided if gentoo.keep_versions > 0")
+	require.ErrorContains(t, Pipe{}.Default(ctx), "version_retention_strategy must be provided if keep_versions > 0")
 }
 
 func TestExtraFileValidator(t *testing.T) {
@@ -1279,7 +1279,7 @@ func TestEbuildData(t *testing.T) {
 		data := ebuildData{
 			Dosym: []installItemData{{Source: "foo"}},
 		}
-		require.EqualError(t, data.Validate(), "gentoo.dosym requires a destination")
+		require.EqualError(t, data.Validate(), "dosym requires a destination")
 	})
 
 	t.Run("Validate valid dosym", func(t *testing.T) {
@@ -1392,7 +1392,7 @@ func TestGentooMetadata(t *testing.T) {
 		require.Equal(t, "alice@example.com", meta.Maintainers[0].Email)
 
 		err = meta.AddMaintainers([]config.GentooMaintainer{{Name: "Invalid"}})
-		require.EqualError(t, err, "gentoo maintainer email is required")
+		require.EqualError(t, err, "maintainer email is required")
 	})
 
 	t.Run("AddUseFlags and SetUpstream and Marshal", func(t *testing.T) {

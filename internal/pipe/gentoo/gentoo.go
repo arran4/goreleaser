@@ -45,7 +45,7 @@ func (Pipe) Default(ctx *context.Context) error {
 			g.ID = "default"
 		}
 		if !g.Bin {
-			return errors.New("gentoo.bin must be true")
+			return errors.New("bin must be true")
 		}
 		if g.CommitMessageTemplate == "" {
 			g.CommitMessageTemplate = "{{ .ProjectName }}: bump to {{ .Tag }}"
@@ -63,16 +63,16 @@ func (Pipe) Default(ctx *context.Context) error {
 			g.Type = "bin"
 		}
 		if g.License == "" {
-			return errors.New("gentoo.license is required")
+			return errors.New("license is required")
 		}
 		if g.KeepVersions < 0 {
-			return errors.New("gentoo.keep_versions must be greater than or equal to 0")
+			return errors.New("keep_versions must be greater than or equal to 0")
 		}
 		if g.VersionRetentionStrategy != "" && g.VersionRetentionStrategy != config.VersionRetentionStrategyKeepLatest && g.VersionRetentionStrategy != config.VersionRetentionStrategyKeepPrereleases {
-			return fmt.Errorf("gentoo.version_retention_strategy %q is not valid, must be one of [keep_latest, keep_prereleases]", g.VersionRetentionStrategy)
+			return fmt.Errorf("version_retention_strategy %q is not valid, must be one of [keep_latest, keep_prereleases]", g.VersionRetentionStrategy)
 		}
 		if g.KeepVersions > 0 && g.VersionRetentionStrategy == "" {
-			return errors.New("gentoo.version_retention_strategy must be provided if gentoo.keep_versions > 0")
+			return errors.New("version_retention_strategy must be provided if keep_versions > 0")
 		}
 		if g.Name == "" {
 			g.Name = ctx.Config.ProjectName
@@ -123,10 +123,10 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 	}
 
 	if cfg.Path == "" || !hasCategory(cfg.Path) {
-		return errors.New("gentoo.path is required and must include the category/package ebuild path")
+		return errors.New("path is required and must include the category/package ebuild path")
 	}
 	if strings.HasPrefix(filepath.ToSlash(filepath.Clean(cfg.Path)), "../") || strings.Contains(filepath.ToSlash(filepath.Clean(cfg.Path)), "/../") {
-		return fmt.Errorf("gentoo.path %q must be a relative category/package/file.ebuild path", cfg.Path)
+		return fmt.Errorf("path %q must be a relative category/package/file.ebuild path", cfg.Path)
 	}
 
 	path, err := tp.Apply(cfg.Path)

@@ -69,7 +69,7 @@ type gentooMetadata struct {
 func (m *gentooMetadata) AddMaintainers(maintainers []config.GentooMaintainer) error {
 	for _, main := range maintainers {
 		if main.Email == "" {
-			return errors.New("gentoo maintainer email is required")
+			return errors.New("maintainer email is required")
 		}
 		exists := false
 		for _, em := range m.Maintainers {

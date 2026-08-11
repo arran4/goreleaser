@@ -81,7 +81,7 @@ type ebuildData struct {
 func (d ebuildData) Validate() error {
 	for _, sym := range d.Dosym {
 		if sym.Target == "" {
-			return errors.New("gentoo.dosym requires a destination")
+			return errors.New("dosym requires a destination")
 		}
 	}
 	return nil
@@ -326,7 +326,7 @@ func gentooExtraFilePath(name string) (string, error) {
 	pathStr := filepath.ToSlash(name)
 	pathStr = strings.TrimPrefix(pathStr, "files/")
 	if pathStr == "" || path.IsAbs(pathStr) || pathStr != path.Clean(pathStr) || strings.HasPrefix(pathStr, "../") || pathStr == ".." {
-		return "", fmt.Errorf("gentoo extra file name %q must remain within the files directory", name)
+		return "", fmt.Errorf("extra file name %q must remain within the files directory", name)
 	}
 	return path.Join("files", pathStr), nil
 }
