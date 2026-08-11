@@ -595,7 +595,7 @@ func (m mockFileDownloader) DownloadFile(_ *import_context.Context, _ client.Rep
 	if content, ok := m.contents[path]; ok {
 		return content, nil
 	}
-	if path == "metadata/layout.conf" {
+	if path == "metadata/layout.conf" || strings.HasSuffix(path, "metadata/layout.conf") {
 		return m.content, nil
 	}
 	return nil, client.ErrNotFound
@@ -1530,7 +1530,7 @@ func TestMetaCache(t *testing.T) {
 	t.Run("meta_cache filter properly applies with overlay path", func(t *testing.T) {
 		repoClient := client.NewMock()
 		repoClient.Files = map[string][]byte{
-			"metadata/layout.conf": []byte("cache-formats = pms\n"),
+			"my-overlay/metadata/layout.conf": []byte("cache-formats = pms\n"),
 		}
 
 		ctx := testctx.WrapWithCfg(t.Context(), config.Project{})

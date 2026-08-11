@@ -169,7 +169,7 @@ func loadOverlaySettings(ctx *context.Context, cfg config.Gentoo, repoClient cli
 	if !ok {
 		return settings, nil
 	}
-	content, err := dl.DownloadFile(ctx, repo, "metadata/layout.conf")
+	content, err := dl.DownloadFile(ctx, repo, path.Join(cfg.OverlayPath, "metadata/layout.conf"))
 	if errors.Is(err, client.ErrNotFound) || errors.Is(err, client.ErrNotImplemented) {
 		return settings, nil
 	}
