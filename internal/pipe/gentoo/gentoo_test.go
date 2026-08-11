@@ -1373,11 +1373,77 @@ func TestGentooMetadata(t *testing.T) {
 }
 
 func TestUpdateVersions(t *testing.T) {
-	// Dummy test to satisfy coverage.
-	// Since updateVersions depends on FileDownloader interface, a full unit test
-	// would require mocking out the directory listing and file downloader.
-	// For now, testing the extracted version parsing logic serves as proof.
-	v := parseGentooVersion("test-1.0-r3.ebuild", "test-")
-	require.NotNil(t, v)
-	require.Equal(t, 3, v.revision)
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
+	stateRepo := client.Repo{Owner: "owner", Name: "repo"}
+
+	t.Run("no matching ebuilds", func(t *testing.T) {
+		g := &publishGroup{
+			files: []client.RepoFile{
+				{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\n")},
+			},
+		}
+		dl := mockFileDownloader{}
+		g.updateVersions(ctx, dl, stateRepo, "app-misc/foo", "foo-", nil)
+		require.Equal(t, "app-misc/foo/foo-1.0.0.ebuild", g.files[0].Path)
+	})
+
+	t.Run("existing ebuild content identical does not bump revision", func(t *testing.T) {
+		dl := mockFileDownloader{
+			contents: map[string][]byte{
+				"app-misc/foo/foo-1.0.0-r1.ebuild": []byte("# comment\nEAPI=8\nDESCRIPTION=\"foo\"\n"),
+			},
+		}
+		g := &publishGroup{
+			files: []client.RepoFile{
+				{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\nDESCRIPTION=\"foo\"\n")},
+			},
+		}
+		g.updateVersions(ctx, dl, stateRepo, "app-misc/foo", "foo-", []string{"foo-1.0.0.ebuild", "foo-1.0.0-r1.ebuild"})
+		require.Equal(t, "app-misc/foo/foo-1.0.0-r1.ebuild", g.files[0].Path)
+	})
+
+	t.Run("existing ebuild content different bumps revision", func(t *testing.T) {
+		dl := mockFileDownloader{
+			contents: map[string][]byte{
+				"app-misc/foo/foo-1.0.0-r1.ebuild": []byte("EAPI=8\nDESCRIPTION=\"old\"\n"),
+			},
+		}
+		g := &publishGroup{
+			files: []client.RepoFile{
+				{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\nDESCRIPTION=\"new\"\n")},
+			},
+		}
+		g.updateVersions(ctx, dl, stateRepo, "app-misc/foo", "foo-", []string{"foo-1.0.0.ebuild", "foo-1.0.0-r1.ebuild"})
+		require.Equal(t, "app-misc/foo/foo-1.0.0-r2.ebuild", g.files[0].Path)
+	})
+
+	t.Run("existing ebuild matches but extra file content changed bumps revision", func(t *testing.T) {
+		dl := mockFileDownloader{
+			contents: map[string][]byte{
+				"app-misc/foo/foo-1.0.0.ebuild": []byte("EAPI=8\n"),
+				"app-misc/foo/files/extra.conf": []byte("old content"),
+			},
+		}
+		g := &publishGroup{
+			files: []client.RepoFile{
+				{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\n")},
+				{Path: "app-misc/foo/files/extra.conf", Content: []byte("new content")},
+			},
+		}
+		g.updateVersions(ctx, dl, stateRepo, "app-misc/foo", "foo-", []string{"foo-1.0.0.ebuild"})
+		require.Equal(t, "app-misc/foo/foo-1.0.0-r1.ebuild", g.files[0].Path)
+	})
+
+	t.Run("skipped deleted and non-ebuild files", func(t *testing.T) {
+		dl := mockFileDownloader{}
+		g := &publishGroup{
+			files: []client.RepoFile{
+				{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\n"), Delete: true},
+				{Path: "app-misc/foo/Manifest", Content: []byte("EBUILD..."), Delete: false},
+			},
+		}
+		g.updateVersions(ctx, dl, stateRepo, "app-misc/foo", "foo-", []string{"foo-1.0.0.ebuild"})
+		require.Equal(t, "app-misc/foo/foo-1.0.0.ebuild", g.files[0].Path)
+		require.Equal(t, "app-misc/foo/Manifest", g.files[1].Path)
+	})
 }
