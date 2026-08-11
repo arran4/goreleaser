@@ -90,11 +90,13 @@ func (m *gentooMetadata) AddMaintainers(maintainers []config.GentooMaintainer) e
 }
 
 func (m *gentooMetadata) AddUseFlags(flags []config.GentooUseFlag) {
+	if len(flags) == 0 {
+		return
+	}
 	if m.Use == nil {
 		m.Use = &gentooUse{}
 	}
 	configuredFlags := make(map[string]string)
-	configuredFlags["doc"] = "Install README man page and other docs"
 	for _, flag := range flags {
 		if flag.Description != "" {
 			configuredFlags[strings.TrimLeft(flag.Flag, "+-")] = flag.Description

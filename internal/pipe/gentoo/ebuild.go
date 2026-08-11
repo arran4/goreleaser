@@ -83,6 +83,12 @@ type ebuildData struct {
 }
 
 func (d ebuildData) Validate() error {
+	if strings.TrimSpace(d.Description) == "" {
+		return errors.New("gentoo description is required and cannot be empty")
+	}
+	if strings.TrimSpace(d.License) == "" {
+		return errors.New("gentoo license is required and cannot be empty")
+	}
 	for _, sym := range d.Dosym {
 		if sym.Target == "" {
 			return errors.New("dosym requires a destination")

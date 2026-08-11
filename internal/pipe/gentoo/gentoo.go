@@ -53,6 +53,9 @@ func (Pipe) Default(ctx *context.Context) error {
 		if g.Type == "" {
 			g.Type = "bin"
 		}
+		if g.Type != "bin" {
+			return fmt.Errorf("invalid gentoo type %q: currently only \"bin\" is supported", g.Type)
+		}
 		if g.Type == "bin" && g.Bindir == "" {
 			g.Bindir = "/opt/bin"
 		} else if g.Bindir == "" {
@@ -61,8 +64,16 @@ func (Pipe) Default(ctx *context.Context) error {
 		if g.License == "" {
 			return errors.New("license is required")
 		}
-		if g.ConflictResolution != "" &&
-			g.ConflictResolution != config.ConflictResolutionFail &&
+		if strings.TrimSpace(g.Description) == "" {
+			g.Description = ctx.Config.ProjectName
+		}
+		if strings.TrimSpace(g.Description) == "" {
+			return errors.New("description is required")
+		}
+		if g.ConflictResolution == "" {
+			g.ConflictResolution = config.ConflictResolutionRevision
+		}
+		if g.ConflictResolution != config.ConflictResolutionFail &&
 			g.ConflictResolution != config.ConflictResolutionOverwrite &&
 			g.ConflictResolution != config.ConflictResolutionRevision {
 			return fmt.Errorf("conflict_resolution %q is not valid, must be one of [Fail, Overwrite, Revision]", g.ConflictResolution)

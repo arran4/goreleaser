@@ -486,7 +486,7 @@ type Gentoo struct {
 	Keywords                 StringArray              `yaml:"keywords,omitempty" json:"keywords,omitempty"`
 	Files                    []ExtraFile              `yaml:"files,omitempty" json:"files,omitempty"`
 	Bin                      bool                     `yaml:"bin" json:"bin"`
-	Type                     string                   `yaml:"type,omitempty" json:"type,omitempty"`
+	Type                     string                   `yaml:"type,omitempty" json:"type,omitempty" jsonschema:"enum=bin"`
 	KeepVersions             int                      `yaml:"keep_versions,omitempty" json:"keep_versions,omitempty"`
 	ConflictResolution       ConflictResolution       `yaml:"conflict_resolution,omitempty" json:"conflict_resolution,omitempty" jsonschema:"enum=Fail,enum=Overwrite,enum=Revision"`
 	VersionRetentionStrategy VersionRetentionStrategy `yaml:"version_retention_strategy,omitempty" json:"version_retention_strategy,omitempty" jsonschema:"enum=keep_latest,enum=keep_prereleases"`

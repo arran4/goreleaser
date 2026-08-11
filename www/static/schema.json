@@ -1616,7 +1616,10 @@
 						"type": "boolean"
 					},
 					"type": {
-						"type": "string"
+						"type": "string",
+						"enum": [
+							"bin"
+						]
 					},
 					"keep_versions": {
 						"type": "integer"

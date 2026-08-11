@@ -1120,8 +1120,19 @@ func TestDefaultValidation(t *testing.T) {
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
 	ctx.Config.Gentoos = []config.Gentoo{
 		{
+			Bin:         true,
+			License:     "MIT",
+			Description: "foo",
+			Type:        "binn",
+		},
+	}
+	require.ErrorContains(t, Pipe{}.Default(ctx), `invalid gentoo type "binn": currently only "bin" is supported`)
+
+	ctx.Config.Gentoos = []config.Gentoo{
+		{
 			Bin:          true,
 			License:      "MIT",
+			Description:  "foo",
 			KeepVersions: -1,
 		},
 	}
@@ -1131,6 +1142,7 @@ func TestDefaultValidation(t *testing.T) {
 		{
 			Bin:                      true,
 			License:                  "MIT",
+			Description:              "foo",
 			KeepVersions:             1,
 			VersionRetentionStrategy: "invalid",
 		},
@@ -1141,6 +1153,7 @@ func TestDefaultValidation(t *testing.T) {
 		{
 			Bin:                      true,
 			License:                  "MIT",
+			Description:              "foo",
 			KeepVersions:             1,
 			VersionRetentionStrategy: "",
 		},
@@ -1372,14 +1385,18 @@ func TestEbuildDeleter(t *testing.T) {
 func TestEbuildData(t *testing.T) {
 	t.Run("Validate invalid dosym", func(t *testing.T) {
 		data := ebuildData{
-			Dosym: []installItemData{{Source: "foo"}},
+			Description: "foo",
+			License:     "MIT",
+			Dosym:       []installItemData{{Source: "foo"}},
 		}
 		require.EqualError(t, data.Validate(), "dosym requires a destination")
 	})
 
 	t.Run("Validate valid dosym", func(t *testing.T) {
 		data := ebuildData{
-			Dosym: []installItemData{{Source: "foo", Target: "bar"}},
+			Description: "foo",
+			License:     "MIT",
+			Dosym:       []installItemData{{Source: "foo", Target: "bar"}},
 		}
 		require.NoError(t, data.Validate())
 	})
