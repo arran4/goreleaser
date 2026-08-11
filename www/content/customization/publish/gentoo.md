@@ -36,16 +36,17 @@ gentoo_overlays:
     # Templates: allowed.
     category: app-admin
 
-    # The relative directory path of the package within the overlay repository.
-    # GoReleaser creates the package directory, Manifest, metadata.xml, and files/ under this path.
+    # Optional root prefix/directory within the overlay repository.
+    # If set, GoReleaser places the category/package directory structure under this prefix.
     #
-    # Default: "{{ .Category }}/{{ .Name }}-bin" (for type "bin") or "{{ .Category }}/{{ .Name }}".
+    # Default: "" (repository root).
     # Templates: allowed.
-    overlay_path: "app-admin/myproject-bin"
+    overlay_path: "subfolder"
 
     # The relative path of the ebuild file within the repository.
+    # Ebuild paths are automatically generated from Category, Name, Type, and Version.
     #
-    # Default: "{{ .OverlayPath }}/<package>-{{ .GentooVersion }}.ebuild".
+    # Default: "[{{ .OverlayPath }}/]{{ .Category }}/<package>/<package>-{{ .GentooVersion }}.ebuild".
     # Templates: allowed (supports {{ .GentooVersion }} and {{ .Version }}).
     path: "app-admin/myproject-bin/myproject-bin-{{ .GentooVersion }}.ebuild"
 

@@ -79,35 +79,24 @@ func (Pipe) Default(ctx *context.Context) error {
 		if g.Name == "" {
 			g.Name = ctx.Config.ProjectName
 		}
-
-		if g.OverlayPath == "" && g.Path == "" {
-			cat := g.Category
-			if cat == "" {
-				cat = "app-misc"
-			}
-			pkgName := g.Name
-			if g.Type == "bin" && !strings.HasSuffix(pkgName, "-bin") {
-				pkgName += "-bin"
-			}
-			g.OverlayPath = filepath.ToSlash(filepath.Join(cat, pkgName))
-		}
-
-		if g.Path == "" && g.OverlayPath != "" {
-			pkgName := filepath.Base(g.OverlayPath)
-			g.Path = filepath.ToSlash(filepath.Join(g.OverlayPath, fmt.Sprintf("%s-{{ .Version }}.ebuild", pkgName)))
-		} else if g.OverlayPath == "" && g.Path != "" {
-			g.OverlayPath = filepath.ToSlash(filepath.Dir(g.Path))
-		}
-
 		if g.Category == "" {
-			parts := strings.Split(filepath.ToSlash(filepath.Clean(g.OverlayPath)), "/")
-			if len(parts) >= 1 && parts[0] != "." && parts[0] != "" {
-				g.Category = parts[0]
-			}
+			g.Category = "app-misc"
 		}
 
-		if g.Category == "" {
-			log.Warnf("no gentoo category configured for %q; defaulting path to %q", g.Name, filepath.ToSlash(g.Path))
+		pkgName := g.Name
+		if g.Type == "bin" && !strings.HasSuffix(pkgName, "-bin") {
+			pkgName += "-bin"
+		}
+
+		pkgDir := filepath.ToSlash(filepath.Join(g.Category, pkgName))
+		if g.OverlayPath != "" {
+			pkgDir = filepath.ToSlash(filepath.Join(g.OverlayPath, pkgDir))
+		}
+
+		if g.Path == "" {
+			g.Path = filepath.ToSlash(filepath.Join(pkgDir, fmt.Sprintf("%s-{{ .Version }}.ebuild", pkgName)))
+		} else if !hasCategory(g.Path) {
+			log.Warnf("gentoo.path %q does not include a category/package path; Gentoo ebuild paths usually look like %q", g.Path, filepath.ToSlash(filepath.Join(pkgDir, fmt.Sprintf("%s-{{ .Version }}.ebuild", pkgName))))
 		}
 		ids.Inc(g.ID)
 	}

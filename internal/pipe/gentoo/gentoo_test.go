@@ -295,7 +295,7 @@ func TestDefaultSetsPath(t *testing.T) {
 	}, testctx.WithVersion("1.0.0"))
 	require.NoError(t, Pipe{}.Default(ctx))
 	require.Equal(t, filepath.Join("app-misc", "foo-bin", "foo-bin-{{ .Version }}.ebuild"), ctx.Config.Gentoos[0].Path)
-	require.Equal(t, filepath.Join("app-misc", "foo-bin"), ctx.Config.Gentoos[0].OverlayPath)
+	require.Empty(t, ctx.Config.Gentoos[0].OverlayPath)
 }
 
 func TestDefaultSetsPathWithCategory(t *testing.T) {
@@ -309,7 +309,22 @@ func TestDefaultSetsPathWithCategory(t *testing.T) {
 	}, testctx.WithVersion("1.0.0"))
 	require.NoError(t, Pipe{}.Default(ctx))
 	require.Equal(t, filepath.Join("app-admin", "foo-bin", "foo-bin-{{ .Version }}.ebuild"), ctx.Config.Gentoos[0].Path)
-	require.Equal(t, filepath.Join("app-admin", "foo-bin"), ctx.Config.Gentoos[0].OverlayPath)
+	require.Empty(t, ctx.Config.Gentoos[0].OverlayPath)
+}
+
+func TestDefaultWithOverlayPath(t *testing.T) {
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+		ProjectName: "foo",
+		Gentoos: []config.Gentoo{{
+			Category:    "app-admin",
+			OverlayPath: "my-prefix",
+			Bin:         true,
+			License:     "MIT",
+		}},
+	}, testctx.WithVersion("1.0.0"))
+	require.NoError(t, Pipe{}.Default(ctx))
+	require.Equal(t, filepath.Join("my-prefix", "app-admin", "foo-bin", "foo-bin-{{ .Version }}.ebuild"), ctx.Config.Gentoos[0].Path)
+	require.Equal(t, "my-prefix", ctx.Config.Gentoos[0].OverlayPath)
 }
 
 func TestPathWithCategoryAndNameTemplates(t *testing.T) {
