@@ -998,5 +998,17 @@ func (g *publishGroup) updateVersions(ctx *context.Context, dl client.FileDownlo
 		newEbuildPath := filepath.ToSlash(filepath.Join(dir, newEbuildName))
 		log.WithField("file", fName).WithField("new_file", newEbuildName).Info("ebuild content changed, bumping revision")
 		g.files[i].Path = newEbuildPath
+
+		oldMetaCachePrefix := filepath.ToSlash(filepath.Join("metadata", "md5-cache", g.cfg.Category, fmt.Sprintf("%s%s", prefix, vStr)))
+		newMetaCachePath := filepath.ToSlash(filepath.Join("metadata", "md5-cache", g.cfg.Category, fmt.Sprintf("%s%s-r%d", prefix, vStr, newRev)))
+		if g.cfg.OverlayPath != "" {
+			oldMetaCachePrefix = filepath.ToSlash(filepath.Join(g.cfg.OverlayPath, oldMetaCachePrefix))
+			newMetaCachePath = filepath.ToSlash(filepath.Join(g.cfg.OverlayPath, newMetaCachePath))
+		}
+		for j := range g.files {
+			if g.files[j].Path == oldMetaCachePrefix {
+				g.files[j].Path = newMetaCachePath
+			}
+		}
 	}
 }

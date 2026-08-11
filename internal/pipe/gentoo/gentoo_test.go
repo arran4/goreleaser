@@ -1779,12 +1779,15 @@ func TestUpdateVersions(t *testing.T) {
 			},
 		}
 		g := &publishGroup{
+			cfg: config.Gentoo{Category: "app-misc"},
 			files: []client.RepoFile{
 				{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\nDESCRIPTION=\"new\"\n")},
+				{Path: "metadata/md5-cache/app-misc/foo-1.0.0", Content: []byte("cache")},
 			},
 		}
 		g.updateVersions(ctx, dl, stateRepo, "app-misc/foo", "foo-", []string{"foo-1.0.0.ebuild", "foo-1.0.0-r1.ebuild"})
 		require.Equal(t, "app-misc/foo/foo-1.0.0-r2.ebuild", g.files[0].Path)
+		require.Equal(t, "metadata/md5-cache/app-misc/foo-1.0.0-r2", g.files[1].Path)
 	})
 
 	t.Run("existing ebuild matches but extra file content changed bumps revision", func(t *testing.T) {
