@@ -240,7 +240,7 @@ gentoo_overlays:
 
 ## Customizing Install Items with `src_id`
 
-Explicit install item lists (`dobin`, `dosbin`, `doexe`, `doins`, etc.) support `src_id` to reference a specific GoReleaser archive artifact by ID and override its installation behavior:
+Explicit install item lists (`dobin`, `dosbin`, `doexe`, `doins`, etc.) support `src_id` to reference a specific GoReleaser archive artifact by ID and override its installation behavior (referencing an archive artifact with `src_id` prevents its default installation mechanism):
 
 * `src`: Literal path to install.
 * `src_id`: GoReleaser archive ID supplying the executable/file.
@@ -249,27 +249,27 @@ Explicit install item lists (`dobin`, `dosbin`, `doexe`, `doins`, etc.) support 
 * **Automatic Binary Suppression**: Referencing an archive artifact ID with `src_id` suppresses its default automatic binary installation, preventing duplicate installation rules. Unreferenced archive binaries continue to be installed automatically.
 * `dst`: May relocate or rename the installed executable/file in the ebuild.
 * `use`: May conditionally install the item under one or more Gentoo `USE` flags.
-* **Multi-Archive Architectures**: Multiple selected archive artifacts may supply binaries for the same Gentoo architecture (e.g. `amd64` supplying both a `default` binary archive and a `cgi` binary archive).
+* **Multi-Archive Architectures**: Multiple selected archive artifacts may supply binaries for the same Gentoo architecture (e.g. `amd64` supplying both a `default` binary archive and a `plugin` binary archive).
 
 ### Example
 
 ```yaml
 gentoo_overlays:
-  - name: abcjustinrss
+  - name: program1
     ids:
       - default
-      - cgi
+      - plugin
 
     useflags:
-      - flag: cgi
-        description: "Install CGI executable"
+      - flag: plugin
+        description: "Install plugin executable"
 
     doexe:
       - src_id: default
-        dst: /opt/bin/abcjustinrss
-      - src_id: cgi
-        dst: /var/www/cgi-bin/abcjustinrss
-        use: [cgi]
+        dst: /opt/bin/program1
+      - src_id: plugin
+        dst: /var/www/cgi-bin/program2
+        use: [plugin]
 ```
 
 ## Limitations

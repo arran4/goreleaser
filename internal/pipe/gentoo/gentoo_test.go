@@ -1577,24 +1577,24 @@ func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
 		dist := t.TempDir()
 		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
 			Dist:        dist,
-			ProjectName: "abcjustinrss",
+			ProjectName: "program1",
 			Gentoos: []config.Gentoo{{
 				Category: "app-misc",
-				Name:     "abcjustinrss",
+				Name:     "program1",
 				Bin:      true,
 				License:  "MIT",
 				UseFlags: []config.GentooUseFlag{
-					{Flag: "cgi", Description: "Install CGI executable"},
+					{Flag: "plugin", Description: "Install plugin executable"},
 				},
 				Doexe: []config.GentooInstallItem{
 					{
 						SrcID: "default",
-						Dst:   "/opt/bin/abcjustinrss",
+						Dst:   "/opt/bin/program1",
 					},
 					{
-						SrcID: "cgi",
-						Dst:   "/var/www/cgi-bin/abcjustinrss",
-						Use:   []string{"cgi"},
+						SrcID: "plugin",
+						Dst:   "/var/www/cgi-bin/program2",
+						Use:   []string{"plugin"},
 					},
 				},
 			}},
@@ -1608,38 +1608,38 @@ func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
 			Type:   artifact.UploadableArchive,
 			Extra: map[string]any{
 				artifact.ExtraID:       "default",
-				artifact.ExtraBinaries: []string{"abcjustinrss"},
+				artifact.ExtraBinaries: []string{"program1"},
 			},
 		})
 		ctx.Artifacts.Add(&artifact.Artifact{
-			Name:   "cgi_linux_amd64.tar.gz",
-			Path:   "dist/cgi_linux_amd64.tar.gz",
+			Name:   "plugin_linux_amd64.tar.gz",
+			Path:   "dist/plugin_linux_amd64.tar.gz",
 			Goos:   "linux",
 			Goarch: "amd64",
 			Type:   artifact.UploadableArchive,
 			Extra: map[string]any{
-				artifact.ExtraID:       "cgi",
-				artifact.ExtraBinaries: []string{"abcjustinrss-cgi"},
+				artifact.ExtraID:       "plugin",
+				artifact.ExtraBinaries: []string{"program2-bin"},
 			},
 		})
 
 		require.NoError(t, Pipe{}.Default(ctx))
 		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
 
-		ebuildPath := filepath.Join(dist, "gentoo", "default", "app-misc", "abcjustinrss-bin", "abcjustinrss-bin-1.0.0.ebuild")
+		ebuildPath := filepath.Join(dist, "gentoo", "default", "app-misc", "program1-bin", "program1-bin-1.0.0.ebuild")
 		content, err := os.ReadFile(ebuildPath)
 		require.NoError(t, err)
 		str := string(content)
 
 		require.Contains(t, str, "amd64? (")
 		require.Contains(t, str, "default_linux_amd64.tar.gz")
-		require.Contains(t, str, "cgi_linux_amd64.tar.gz")
+		require.Contains(t, str, "plugin_linux_amd64.tar.gz")
 
 		require.Contains(t, str, `exeinto "/opt/bin"`)
-		require.Contains(t, str, `doexe "abcjustinrss"`)
-		require.Contains(t, str, `if use cgi; then`)
+		require.Contains(t, str, `doexe "program1"`)
+		require.Contains(t, str, `if use plugin; then`)
 		require.Contains(t, str, `exeinto "/var/www/cgi-bin"`)
-		require.Contains(t, str, `newexe "abcjustinrss-cgi" "abcjustinrss"`)
+		require.Contains(t, str, `newexe "program2-bin" "program2"`)
 	})
 
 	t.Run("src_id with src and partial suppression", func(t *testing.T) {
