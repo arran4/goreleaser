@@ -1485,3 +1485,22 @@ func TestUpdateVersions(t *testing.T) {
 		require.Equal(t, "app-misc/foo/Manifest", g.files[1].Path)
 	})
 }
+
+func TestApplyVersionRetentionErrNotImplemented(t *testing.T) {
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
+	stateRepo := client.Repo{Owner: "owner", Name: "repo"}
+
+	cli := client.NewMock() // Mock returns ErrNotImplemented for ListDir
+	g := &publishGroup{
+		cfg: config.Gentoo{
+			Path: "app-misc/foo/foo-1.0.0.ebuild",
+		},
+		files: []client.RepoFile{
+			{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\n")},
+		},
+	}
+
+	deleted, err := g.applyVersionRetention(ctx, cli, stateRepo)
+	require.NoError(t, err)
+	require.Nil(t, deleted)
+}
