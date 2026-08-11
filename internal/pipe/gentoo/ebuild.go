@@ -80,6 +80,7 @@ type ebuildData struct {
 	Dosbin        []installItemData
 	Dosym         []installItemData
 	Systemd       []installItemData
+	Eclasses      []string
 }
 
 func (d ebuildData) Validate() error {
@@ -95,6 +96,10 @@ func (d ebuildData) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (d ebuildData) HasEclasses() bool {
+	return len(d.Eclasses) > 0
 }
 
 func (d ebuildData) RenderEbuild() (string, error) {
@@ -128,10 +133,6 @@ func (d ebuildData) FormattedSrcURIs() []string {
 		}
 	}
 	return srcURIs
-}
-
-func (d ebuildData) HasEclasses() bool {
-	return len(d.Systemd) > 0
 }
 
 func (d ebuildData) RenderMetaCache(ebuildContent string) (string, error) {

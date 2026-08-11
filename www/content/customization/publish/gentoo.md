@@ -122,6 +122,13 @@ gentoo_overlays:
     # Default: false.
     # meta_cache: true
 
+    # Additional Gentoo eclasses to inherit.
+    #
+    # Default: empty.
+    # eclasses:
+    #   - desktop
+    #   - systemd
+
     # Overrides for manifest hashes. Usually derived from metadata/layout.conf.
     #
     # Default: null (defers to layout.conf or ["BLAKE2B", "SHA512"]).
