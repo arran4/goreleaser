@@ -115,7 +115,7 @@ func (d ebuildData) RenderEbuild() (string, error) {
 	var buf bytes.Buffer
 	if err := template.Must(template.New("ebuild").Funcs(template.FuncMap{
 		"escape": shellEscape,
-		"indentUse": func(keywords []string, use []string) string {
+		"indentUse": func(keywords []string, _ []string) string {
 			ind := "  "
 			if len(keywords) > 0 {
 				ind += "  "

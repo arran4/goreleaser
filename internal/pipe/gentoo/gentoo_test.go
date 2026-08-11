@@ -837,7 +837,7 @@ func TestTemplateScenarios(t *testing.T) {
 			var buf bytes.Buffer
 			err := template.Must(template.New("ebuild").Funcs(template.FuncMap{
 				"escape": shellEscape,
-				"indentUse": func(keywords []string, use []string) string {
+				"indentUse": func(keywords []string, _ []string) string {
 					ind := "  "
 					if len(keywords) > 0 {
 						ind += "  "
