@@ -303,24 +303,26 @@ func (v *extraFilesProcessor) InstallExtraFiles(ctx *context.Context, ebuildPath
 	return nil
 }
 
-func gentooArch(goarch string) string {
+func gentooArch(goarch string) (string, error) {
 	switch goarch {
 	case "386":
-		return "x86"
+		return "x86", nil
 	case "amd64":
-		return "amd64"
+		return "amd64", nil
+	case "arm":
+		return "arm", nil
 	case "arm64":
-		return "arm64"
+		return "arm64", nil
 	case "loong64":
-		return "loong"
-	case "riscv64":
-		return "riscv"
+		return "loong", nil
 	case "ppc64le":
-		return "ppc64"
+		return "ppc64", nil
+	case "riscv64":
+		return "riscv", nil
 	case "s390x":
-		return "s390"
+		return "s390", nil
 	default:
-		return goarch
+		return "", fmt.Errorf("unsupported or ambiguous architecture %q for Gentoo ebuild", goarch)
 	}
 }
 

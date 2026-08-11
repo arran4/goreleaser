@@ -168,7 +168,10 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		if err != nil {
 			return err
 		}
-		kw := gentooArch(art.Goarch)
+		kw, err := gentooArch(art.Goarch)
+		if err != nil {
+			return err
+		}
 		if prev, exists := seenGentooArch[kw]; exists {
 			return fmt.Errorf("multiple linux archives map to Gentoo architecture %q (%s and %s); please filter artifacts or use ids", kw, prev.Name, art.Name)
 		}

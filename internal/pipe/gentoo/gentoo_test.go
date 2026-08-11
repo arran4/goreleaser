@@ -959,24 +959,60 @@ func TestParseGentooVersion(t *testing.T) {
 
 func TestGentooArch(t *testing.T) {
 	tests := []struct {
-		name     string
-		goarch   string
-		expected string
+		name      string
+		goarch    string
+		expected  string
+		expectErr bool
 	}{
-		{"386", "386", "x86"},
-		{"amd64", "amd64", "amd64"},
-		{"arm64", "arm64", "arm64"},
-		{"loong64", "loong64", "loong"},
-		{"riscv64", "riscv64", "riscv"},
-		{"ppc64le", "ppc64le", "ppc64"},
-		{"s390x", "s390x", "s390"},
+		{"386", "386", "x86", false},
+		{"amd64", "amd64", "amd64", false},
+		{"arm", "arm", "arm", false},
+		{"arm64", "arm64", "arm64", false},
+		{"loong64", "loong64", "loong", false},
+		{"riscv64", "riscv64", "riscv", false},
+		{"ppc64le", "ppc64le", "ppc64", false},
+		{"s390x", "s390x", "s390", false},
+		{"unsupported mips64le", "mips64le", "", true},
+		{"unsupported sparc64", "sparc64", "", true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.expected, gentooArch(tt.goarch))
+			got, err := gentooArch(tt.goarch)
+			if tt.expectErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tt.expected, got)
+			}
 		})
 	}
+}
+
+func TestDoRunUnsupportedGentooArch(t *testing.T) {
+	dist := t.TempDir()
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+		Dist:        dist,
+		ProjectName: "foo",
+		Gentoos: []config.Gentoo{{
+			Path:       "app-misc/foo/foo-1.0.0.ebuild",
+			Repository: config.RepoRef{Name: "overlay"},
+			Bin:        true,
+			License:    "MIT",
+		}},
+	}, testctx.WithVersion("1.0.0"))
+
+	ctx.Artifacts.Add(&artifact.Artifact{
+		Name:   "foo_1.0.0_linux_mips64le.tar.gz",
+		Path:   "mips64le.tar.gz",
+		Goos:   "linux",
+		Goarch: "mips64le",
+		Type:   artifact.UploadableArchive,
+	})
+
+	cli := client.NewMock()
+	err := doRun(ctx, ctx.Config.Gentoos[0], cli)
+	require.ErrorContains(t, err, `unsupported or ambiguous architecture "mips64le" for Gentoo ebuild`)
 }
 
 func TestDoRunDuplicateGentooArch(t *testing.T) {
