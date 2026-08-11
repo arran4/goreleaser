@@ -1012,7 +1012,7 @@ func TestDoRunUnsupportedGentooArch(t *testing.T) {
 
 	cli := client.NewMock()
 	err := doRun(ctx, ctx.Config.Gentoos[0], cli)
-	require.ErrorContains(t, err, `unsupported or ambiguous architecture "mips64le" for Gentoo ebuild`)
+	require.ErrorContains(t, err, `unsupported or ambiguous architecture "mips64le"`)
 }
 
 func TestDoRunDuplicateGentooArch(t *testing.T) {

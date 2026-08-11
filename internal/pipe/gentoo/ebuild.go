@@ -322,7 +322,7 @@ func gentooArch(goarch string) (string, error) {
 	case "s390x":
 		return "s390", nil
 	default:
-		return "", fmt.Errorf("unsupported or ambiguous architecture %q for Gentoo ebuild", goarch)
+		return "", fmt.Errorf("unsupported or ambiguous architecture %q", goarch)
 	}
 }
 
