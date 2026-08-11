@@ -323,7 +323,7 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 	newManifestFiles := map[string]struct{}{}
 	if !thinManifests {
 		for _, f := range *files {
-			if !f.Delete {
+			if !f.Delete && isInsidePackageDir(f.Path, dir) {
 				recordType, filename := manifestFileInfo(f.Path, dir)
 				newManifestFiles[recordType+":"+filename] = struct{}{}
 			}
@@ -415,7 +415,7 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 
 	if !thinManifests {
 		for _, f := range *files {
-			if f.Delete {
+			if f.Delete || !isInsidePackageDir(f.Path, dir) {
 				continue
 			}
 
@@ -463,4 +463,10 @@ func manifestFileInfo(filePath, packageDir string) (string, string) {
 		return "EBUILD", path.Base(pathStr)
 	}
 	return "MISC", path.Base(pathStr)
+}
+
+func isInsidePackageDir(filePath, packageDir string) bool {
+	p := filepath.ToSlash(filePath)
+	d := filepath.ToSlash(packageDir)
+	return p == d || strings.HasPrefix(p, d+"/")
 }
