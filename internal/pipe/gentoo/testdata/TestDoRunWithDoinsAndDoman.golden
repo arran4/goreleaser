@@ -10,7 +10,7 @@ SRC_URI="
 LICENSE="MIT"
 SLOT="0"
 KEYWORDS="~amd64"
-IUSE="doc"
+IUSE=""
 
 S="${WORKDIR}"
 
@@ -22,7 +22,4 @@ src_install() {
   insinto /
   doins "simple.yaml"
   doman "foo.1"
-  if use doc; then
-    dodoc README* || die
-  fi
 }

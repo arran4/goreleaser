@@ -165,7 +165,4 @@ src_install() {
 {{- range .Dodoc }}
   dodoc "{{ . }}"
 {{- end }}
-  if use doc; then
-    dodoc README* || die
-  fi
 }

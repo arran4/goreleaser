@@ -332,27 +332,14 @@ func gentooExtraFilePath(name string) (string, error) {
 }
 
 func gentooUseFlags(cfg config.Gentoo) []config.GentooUseFlag {
-	docFlag := config.GentooUseFlag{
-		Flag:        "doc",
-		Description: "Install README man page and other docs",
-	}
-	useFlagsLen := len(cfg.UseFlags)
-	capHint := useFlagsLen
-	if capHint < int(^uint(0)>>1) {
-		capHint++
-	}
-	flags := make([]config.GentooUseFlag, 1, capHint)
+	var flags []config.GentooUseFlag
+	configured := make(map[string]struct{})
 	for _, flag := range cfg.UseFlags {
-		if strings.TrimLeft(flag.Flag, "+-") == "doc" {
-			docFlag = flag
-			continue
+		name := strings.TrimLeft(flag.Flag, "+-")
+		if _, ok := configured[name]; !ok {
+			configured[name] = struct{}{}
+			flags = append(flags, flag)
 		}
-		flags = append(flags, flag)
-	}
-	flags[0] = docFlag
-	configured := make(map[string]struct{}, len(flags))
-	for _, flag := range flags {
-		configured[strings.TrimLeft(flag.Flag, "+-")] = struct{}{}
 	}
 
 	items := [][]config.GentooInstallItem{
