@@ -146,12 +146,12 @@ gentoo_overlays:
     # Templates: allowed.
     homepage: "https://myproject.com"
 
-    # The ebuild's description.
+    # Description of the packaged software (populates DESCRIPTION in the ebuild).
     #
     # Templates: allowed.
     description: "Software to create fast and easy drum rolls."
 
-    # The ebuild's license.
+    # License of the packaged software (populates LICENSE in the ebuild).
     #
     # Required.
     # Templates: allowed.
