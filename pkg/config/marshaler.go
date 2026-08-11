@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -214,7 +215,7 @@ func (c *ConflictResolution) UnmarshalYAML(unmarshal func(any) error) error {
 	case strings.EqualFold(s, string(ConflictResolutionRevision)):
 		*c = ConflictResolutionRevision
 	default:
-		*c = ConflictResolution(s)
+		return fmt.Errorf("invalid conflict_resolution %q, must be one of Fail, Overwrite, or Revision", s)
 	}
 	return nil
 }

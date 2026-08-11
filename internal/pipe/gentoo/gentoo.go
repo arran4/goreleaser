@@ -50,20 +50,22 @@ func (Pipe) Default(ctx *context.Context) error {
 		if g.CommitMessageTemplate == "" {
 			g.CommitMessageTemplate = "{{ .ProjectName }}: bump to {{ .Tag }}"
 		}
-		if g.Type == "bin" || g.Type == "" {
-			if g.Bindir == "" {
-				g.Bindir = "/opt/bin"
-			}
-		} else {
-			if g.Bindir == "" {
-				g.Bindir = "/usr/bin"
-			}
-		}
 		if g.Type == "" {
 			g.Type = "bin"
 		}
+		if g.Type == "bin" && g.Bindir == "" {
+			g.Bindir = "/opt/bin"
+		} else if g.Bindir == "" {
+			g.Bindir = "/usr/bin"
+		}
 		if g.License == "" {
 			return errors.New("license is required")
+		}
+		if g.ConflictResolution != "" &&
+			g.ConflictResolution != config.ConflictResolutionFail &&
+			g.ConflictResolution != config.ConflictResolutionOverwrite &&
+			g.ConflictResolution != config.ConflictResolutionRevision {
+			return fmt.Errorf("conflict_resolution %q is not valid, must be one of [Fail, Overwrite, Revision]", g.ConflictResolution)
 		}
 		if g.KeepVersions < 0 {
 			return errors.New("keep_versions must be greater than or equal to 0")
@@ -77,13 +79,8 @@ func (Pipe) Default(ctx *context.Context) error {
 		if g.Name == "" {
 			g.Name = ctx.Config.ProjectName
 		}
-		if g.Path == "" {
-			g.Path = defaultPath(g.Name, g.Category, g.Type)
-			if g.Category == "" {
-				log.Warnf("no gentoo category configured for %q; defaulting path to %q", g.Name, filepath.ToSlash(g.Path))
-			}
-		} else if !hasCategory(g.Path) {
-			log.Warnf("gentoo.path %q does not include a category/package path; Gentoo ebuild paths usually look like %q", g.Path, filepath.ToSlash(defaultPath(g.Name, g.Category, g.Type)))
+		if g.Category == "" {
+			g.Category = "app-misc"
 		}
 		ids.Inc(g.ID)
 	}
@@ -109,11 +106,12 @@ func runAll(ctx *context.Context, cl client.ReleaseURLTemplater) error {
 
 func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplater) error {
 	tp := tmpl.New(ctx).WithExtraFields(tmpl.Fields{
-		"Version":  gentooVersion(ctx.Version),
-		"Name":     cfg.Name,
-		"Category": cfg.Category,
+		"GentooVersion": gentooVersion(ctx.Version),
+		"Version":       gentooVersion(ctx.Version),
+		"Name":          cfg.Name,
+		"Category":      cfg.Category,
 	})
-	if err := tp.ApplyAll(&cfg.Name, &cfg.Category, &cfg.Path, &cfg.Description, &cfg.Homepage, &cfg.BugsTo, &cfg.License); err != nil {
+	if err := tp.ApplyAll(&cfg.Name, &cfg.Category, &cfg.OverlayPath, &cfg.Description, &cfg.Homepage, &cfg.BugsTo, &cfg.License); err != nil {
 		return err
 	}
 	var err error
@@ -122,19 +120,12 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		return err
 	}
 
-	if cfg.Path == "" || !hasCategory(cfg.Path) {
-		return errors.New("path is required and must include the category/package ebuild path")
-	}
-	if strings.HasPrefix(filepath.ToSlash(filepath.Clean(cfg.Path)), "../") || strings.Contains(filepath.ToSlash(filepath.Clean(cfg.Path)), "/../") {
-		return fmt.Errorf("path %q must be a relative category/package/file.ebuild path", cfg.Path)
+	relPath := ebuildRelPath(ctx, cfg)
+	if strings.HasPrefix(filepath.ToSlash(filepath.Clean(relPath)), "../") || strings.Contains(filepath.ToSlash(filepath.Clean(relPath)), "/../") {
+		return fmt.Errorf("path %q must be a relative category/package/file.ebuild path", relPath)
 	}
 
-	path, err := tp.Apply(cfg.Path)
-	if err != nil {
-		return err
-	}
-
-	path = filepath.Join(ctx.Config.Dist, "gentoo", cfg.ID, path)
+	path := filepath.Join(ctx.Config.Dist, "gentoo", cfg.ID, relPath)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -283,14 +274,16 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		Type: artifact.GentooEbuild,
 		Extra: map[string]any{
 			ebuildExtra:     cfg,
-			ebuildPathExtra: cfg.Path,
+			ebuildPathExtra: relPath,
 		},
 	})
 
 	if cfg.MetaCache {
 		pkgVer := strings.TrimSuffix(filepath.Base(path), ".ebuild")
-		category := strings.Split(filepath.ToSlash(filepath.Clean(cfg.Path)), "/")[0]
-		metaCachePath := filepath.ToSlash(filepath.Join("metadata", "md5-cache", category, pkgVer))
+		metaCachePath := filepath.ToSlash(filepath.Join("metadata", "md5-cache", cfg.Category, pkgVer))
+		if cfg.OverlayPath != "" {
+			metaCachePath = filepath.ToSlash(filepath.Join(cfg.OverlayPath, metaCachePath))
+		}
 		metaCacheDistPath := filepath.Join(ctx.Config.Dist, "gentoo", cfg.ID, metaCachePath)
 
 		metaContent := generateMetaCacheContent(data, content)
@@ -363,7 +356,7 @@ func collectPublishGroups(ctx *context.Context) ([]*publishGroup, error) {
 }
 
 func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient client.Client, repo client.Repo) ([]string, error) {
-	dir := filepath.ToSlash(filepath.Dir(g.cfg.Path))
+	dir := packageDir(g.cfg)
 	stateRepo := repo
 	if g.cfg.Repository.PullRequest.Enabled {
 		stateRepo.Branch = g.cfg.Repository.PullRequest.Base.Branch
@@ -448,10 +441,13 @@ func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient cl
 		}
 	}
 
-	category := strings.Split(filepath.ToSlash(filepath.Clean(g.cfg.Path)), "/")[0]
+	metaCacheDir := filepath.ToSlash(filepath.Join("metadata", "md5-cache", g.cfg.Category))
+	if g.cfg.OverlayPath != "" {
+		metaCacheDir = filepath.ToSlash(filepath.Join(g.cfg.OverlayPath, metaCacheDir))
+	}
 	metaCacheFiles := map[string]struct{}{}
 	if g.cfg.MetaCache {
-		cacheNames, err := lister.ListDir(ctx, stateRepo, filepath.ToSlash(filepath.Join("metadata", "md5-cache", category)))
+		cacheNames, err := lister.ListDir(ctx, stateRepo, metaCacheDir)
 		if err != nil && !errors.Is(err, client.ErrNotFound) && !errors.Is(err, client.ErrNotImplemented) {
 			return nil, err
 		}
@@ -463,7 +459,7 @@ func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient cl
 	var deletedEbuilds []string
 	deleter := &ebuildDeleter{
 		dir:            dir,
-		category:       category,
+		category:       g.cfg.Category,
 		metaCacheFiles: metaCacheFiles,
 		files:          &g.files,
 		deletedEbuilds: &deletedEbuilds,
@@ -708,20 +704,25 @@ func (Pipe) Publish(ctx *context.Context) error {
 	return nil
 }
 
-func defaultPath(name, category, typ string) string {
-	if category == "" {
-		category = "app-misc"
+func packageDir(cfg config.Gentoo) string {
+	pkgName := cfg.Name
+	if cfg.Type == "bin" && !strings.HasSuffix(pkgName, "-bin") {
+		pkgName += "-bin"
 	}
-	suffix := ""
-	if typ == "bin" {
-		suffix = "-bin"
+	dir := filepath.ToSlash(filepath.Join(cfg.Category, pkgName))
+	if cfg.OverlayPath != "" {
+		dir = filepath.ToSlash(filepath.Join(cfg.OverlayPath, dir))
 	}
-	return filepath.Join(category, name+suffix, fmt.Sprintf("%s%s-{{ .Version }}.ebuild", name, suffix))
+	return dir
 }
 
-func hasCategory(path string) bool {
-	parts := strings.Split(filepath.ToSlash(filepath.Clean(path)), "/")
-	return len(parts) >= 3 && parts[0] != "." && parts[0] != "" && parts[1] != "" && parts[2] != ""
+func ebuildRelPath(ctx *context.Context, cfg config.Gentoo) string {
+	pkgName := cfg.Name
+	if cfg.Type == "bin" && !strings.HasSuffix(pkgName, "-bin") {
+		pkgName += "-bin"
+	}
+	dir := packageDir(cfg)
+	return filepath.ToSlash(filepath.Join(dir, fmt.Sprintf("%s-%s.ebuild", pkgName, gentooVersion(ctx.Version))))
 }
 
 func copyFile(src, dst string) error {

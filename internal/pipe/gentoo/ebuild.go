@@ -296,7 +296,7 @@ func (v *extraFilesProcessor) InstallExtraFiles(ctx *context.Context, ebuildPath
 			Type: artifact.GentooFile,
 			Extra: map[string]any{
 				ebuildExtra:     v.cfg,
-				ebuildPathExtra: path.Join(filepath.ToSlash(filepath.Dir(v.cfg.Path)), filepath.ToSlash(destName)),
+				ebuildPathExtra: path.Join(packageDir(v.cfg), filepath.ToSlash(destName)),
 			},
 		})
 	}

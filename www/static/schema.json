@@ -1582,7 +1582,7 @@
 					"category": {
 						"type": "string"
 					},
-					"path": {
+					"overlay_path": {
 						"type": "string"
 					},
 					"repository": {
@@ -1622,10 +1622,19 @@
 						"type": "integer"
 					},
 					"conflict_resolution": {
-						"type": "string"
+						"type": "string",
+						"enum": [
+							"Fail",
+							"Overwrite",
+							"Revision"
+						]
 					},
 					"version_retention_strategy": {
-						"type": "string"
+						"type": "string",
+						"enum": [
+							"keep_latest",
+							"keep_prereleases"
+						]
 					},
 					"skip_upload": {
 						"oneOf": [
