@@ -21,12 +21,12 @@ content # not a comment here
 
 func TestExtractVersion(t *testing.T) {
 	v := parseGentooVersion("foo-1.0.0.ebuild", "foo-")
-	if v == nil || v.version.String() != "1.0.0" || v.revision != 0 {
+	if v == nil || v.revision != 0 || len(v.baseNum) != 3 || v.baseNum[0] != 1 || v.baseNum[1] != 0 || v.baseNum[2] != 0 {
 		t.Errorf("expected 1.0.0, 0 got %v", v)
 	}
 
 	v2 := parseGentooVersion("foo-1.0.0-r1.ebuild", "foo-")
-	if v2 == nil || v2.version.String() != "1.0.0" || v2.revision != 1 {
+	if v2 == nil || v2.revision != 1 || len(v2.baseNum) != 3 || v2.baseNum[0] != 1 || v2.baseNum[1] != 0 || v2.baseNum[2] != 0 {
 		t.Errorf("expected 1.0.0, 1 got %v", v2)
 	}
 }

@@ -499,11 +499,18 @@ func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient cl
 			switch b {
 			case "alpha":
 				if (maxVersions["beta"] != nil && !v.GreaterThan(maxVersions["beta"])) ||
+					(maxVersions["pre"] != nil && !v.GreaterThan(maxVersions["pre"])) ||
 					(maxVersions["rc"] != nil && !v.GreaterThan(maxVersions["rc"])) ||
 					(maxVersions["stable"] != nil && !v.GreaterThan(maxVersions["stable"])) {
 					violates = true
 				}
 			case "beta":
+				if (maxVersions["pre"] != nil && !v.GreaterThan(maxVersions["pre"])) ||
+					(maxVersions["rc"] != nil && !v.GreaterThan(maxVersions["rc"])) ||
+					(maxVersions["stable"] != nil && !v.GreaterThan(maxVersions["stable"])) {
+					violates = true
+				}
+			case "pre":
 				if (maxVersions["rc"] != nil && !v.GreaterThan(maxVersions["rc"])) ||
 					(maxVersions["stable"] != nil && !v.GreaterThan(maxVersions["stable"])) {
 					violates = true
@@ -762,7 +769,7 @@ func (g *publishGroup) updateVersions(ctx *context.Context, dl client.FileDownlo
 		var maxREbuild string
 		for _, e := range ebuilds {
 			ev := parseGentooVersion(e, prefix)
-			if ev != nil && ev.version.Equal(v.version) && ev.revision > maxR {
+			if ev != nil && ev.baseEqual(v) && ev.revision > maxR {
 				maxR = ev.revision
 				maxREbuild = e
 			}
