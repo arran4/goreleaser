@@ -424,29 +424,35 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 
 	if cfg.MetaCache {
 		pkgVer := strings.TrimSuffix(filepath.Base(path), ".ebuild")
-		metaCachePath := filepath.ToSlash(filepath.Join("metadata", "md5-cache", cfg.Category, pkgVer))
-		if cfg.OverlayPath != "" {
-			metaCachePath = filepath.ToSlash(filepath.Join(cfg.OverlayPath, metaCachePath))
-		}
-		metaCacheDistPath := filepath.Join(ctx.Config.Dist, "gentoo", cfg.ID, metaCachePath)
+		if data.HasEclasses() {
+			log.Warnf("gentoo: meta_cache is enabled for %q, but ebuild %q inherits eclasses; skipping metadata cache generation", cfg.ID, pkgVer)
+		} else {
+			metaCachePath := filepath.ToSlash(filepath.Join("metadata", "md5-cache", cfg.Category, pkgVer))
+			if cfg.OverlayPath != "" {
+				metaCachePath = filepath.ToSlash(filepath.Join(cfg.OverlayPath, metaCachePath))
+			}
+			metaCacheDistPath := filepath.Join(ctx.Config.Dist, "gentoo", cfg.ID, metaCachePath)
 
-		metaContent := generateMetaCacheContent(data, content)
-		if err := os.MkdirAll(filepath.Dir(metaCacheDistPath), 0o755); err != nil {
-			return err
+			metaContent := generateMetaCacheContent(data, content)
+			if metaContent != "" {
+				if err := os.MkdirAll(filepath.Dir(metaCacheDistPath), 0o755); err != nil {
+					return err
+				}
+				if err := os.WriteFile(metaCacheDistPath, []byte(metaContent), 0o644); err != nil {
+					return err
+				}
+				ctx.Artifacts.Add(&artifact.Artifact{
+					Name: pkgVer,
+					Path: metaCacheDistPath,
+					Type: artifact.GentooFile,
+					Extra: map[string]any{
+						ebuildExtra:     cfg,
+						ebuildPathExtra: metaCachePath,
+						ebuildMetaCache: true,
+					},
+				})
+			}
 		}
-		if err := os.WriteFile(metaCacheDistPath, []byte(metaContent), 0o644); err != nil {
-			return err
-		}
-		ctx.Artifacts.Add(&artifact.Artifact{
-			Name: pkgVer,
-			Path: metaCacheDistPath,
-			Type: artifact.GentooFile,
-			Extra: map[string]any{
-				ebuildExtra:     cfg,
-				ebuildPathExtra: metaCachePath,
-				ebuildMetaCache: true,
-			},
-		})
 	}
 
 	return nil
