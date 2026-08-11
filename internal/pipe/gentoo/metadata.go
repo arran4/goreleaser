@@ -325,8 +325,8 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 		}
 
 		filename := filepath.Base(f.Path)
-		if strings.HasPrefix(filename, prefix) {
-			v := strings.TrimSuffix(strings.TrimPrefix(filename, prefix), ".ebuild")
+		if v, ok := strings.CutPrefix(filename, prefix); ok {
+			v = strings.TrimSuffix(v, ".ebuild")
 			if idx := strings.LastIndex(v, "-r"); idx != -1 {
 				if _, err := strconv.Atoi(v[idx+2:]); err == nil {
 					v = v[:idx]
@@ -339,7 +339,8 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 	var deletedVersions []string
 	var deletedBaseVersions []string
 	for _, e := range deletedEbuilds {
-		v := strings.TrimSuffix(strings.TrimPrefix(e, prefix), ".ebuild")
+		v, _ := strings.CutPrefix(e, prefix)
+		v = strings.TrimSuffix(v, ".ebuild")
 		deletedVersions = append(deletedVersions, v)
 
 		baseV := v
