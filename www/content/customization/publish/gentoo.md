@@ -113,11 +113,12 @@ gentoo_overlays:
     bindir: "/usr/bin"
 
     # Enable Gentoo metadata cache generation (metadata/md5-cache/<category>/<package>-<version>).
+    # Experimental / best-effort option.
     # Note: If the repository's metadata/layout.conf disables cache-formats (e.g. cache-formats is specified without md5-dict),
     # metadata cache generation will be disabled automatically.
     #
     # Default: false.
-    meta_cache: true
+    # meta_cache: true
 
     # Overrides for manifest hashes. Usually derived from metadata/layout.conf.
     #
