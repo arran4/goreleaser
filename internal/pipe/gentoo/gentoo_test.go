@@ -796,7 +796,7 @@ func TestTemplateScenarios(t *testing.T) {
 			name: "scenario_doexe",
 			doexe: []installItemData{
 				{Source: "custom_bin", Target: "/opt/custom/custom_bin", Dir: "/opt/custom", Base: "custom_bin"},
-				{Source: "renamed_bin_x86", Target: "/opt/other/renamed_bin", Dir: "/opt/other", Base: "renamed_bin"},
+				{Source: "renamed_bin_x86", Target: "/opt/other/renamed_bin", Dir: "/opt/other", Base: "renamed_bin", Keywords: []string{"amd64"}},
 				{Source: "default_bin", Target: "", Dir: "", Base: ""},
 			},
 		},
@@ -2022,6 +2022,59 @@ func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
 		require.NoError(t, Pipe{}.Default(ctx))
 		err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
 		require.ErrorContains(t, err, `gentoo doexe: src_id "default" has mismatched archive layouts across architectures; specify explicit src`)
+	})
+
+	t.Run("doexe with archs avoids mismatched layouts error and generates conditionals", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "myapp",
+			Gentoos: []config.Gentoo{{
+				Category:    "app-misc",
+				Name:        "myapp",
+				Bin:         true,
+				License:     "MIT",
+				Description: "foo",
+				Doexe: []config.GentooInstallItem{
+					{SrcID: "default", Archs: []string{"amd64"}},
+					{SrcID: "default", Archs: []string{"arm64"}},
+				},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "myapp_amd64.tar.gz",
+			Path:   "dist/myapp_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:        "default",
+				artifact.ExtraWrappedIn: "dir_amd64",
+			},
+		})
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "myapp_arm64.tar.gz",
+			Path:   "dist/myapp_arm64.tar.gz",
+			Goos:   "linux",
+			Goarch: "arm64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:        "default",
+				artifact.ExtraWrappedIn: "dir_arm64",
+			},
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+
+		ebuildPath := filepath.Join(dist, "gentoo", "default", "app-misc", "myapp-bin", "myapp-bin-1.0.0.ebuild")
+		content, err := os.ReadFile(ebuildPath)
+		require.NoError(t, err)
+		str := string(content)
+
+		require.Contains(t, str, "if use amd64; then\n  exeinto /opt/bin\n  doexe \"dir_amd64/myapp\"\n  fi")
+		require.Contains(t, str, "if use arm64; then\n  exeinto /opt/bin\n  doexe \"dir_arm64/myapp\"\n  fi")
 	})
 
 	t.Run("plain src stays literal even with wrappedIn archive", func(t *testing.T) {
