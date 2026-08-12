@@ -3,6 +3,7 @@ package client
 import (
 	"cmp"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -321,7 +322,8 @@ func (c *gitlabClient) CreateFile(
 		WithField("fileName", fileName).
 		Info("pushing file")
 
-	stringContents := string(content)
+	encoding := "base64"
+	stringContents := base64.StdEncoding.EncodeToString(content)
 
 	if res.StatusCode == 404 {
 		// Create a new file because it's not already there
@@ -335,6 +337,7 @@ func (c *gitlabClient) CreateFile(
 			AuthorName:    &commitAuthor.Name,
 			AuthorEmail:   &commitAuthor.Email,
 			Content:       &stringContents,
+			Encoding:      &encoding,
 			Branch:        &branch,
 			CommitMessage: &message,
 		}
@@ -380,6 +383,7 @@ func (c *gitlabClient) CreateFile(
 		AuthorName:    &commitAuthor.Name,
 		AuthorEmail:   &commitAuthor.Email,
 		Content:       &stringContents,
+		Encoding:      &encoding,
 		Branch:        &branch,
 		CommitMessage: &message,
 	}

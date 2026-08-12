@@ -3,6 +3,7 @@ package client
 import (
 	"cmp"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -425,24 +426,14 @@ func (c *githubClient) CreateFile(
 		branch = defBranch
 	}
 
-	options := &github.RepositoryContentFileOptions{
-		Content: content,
-		Message: &message,
-	}
-
+	var committer *github.CommitAuthor
 	// When using a GitHub App token, omit the committer to get automatic signed commits
 	// See: https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification#signature-verification-for-bots
 	if !commitAuthor.UseGitHubAppToken {
-		options.Committer = &github.CommitAuthor{
+		committer = &github.CommitAuthor{
 			Name:  &commitAuthor.Name,
 			Email: &commitAuthor.Email,
 		}
-	}
-
-	// Set the branch if we got it above...otherwise, just default to
-	// whatever the SDK does auto-magically
-	if branch != "" {
-		options.Branch = &branch
 	}
 
 	log.
@@ -451,67 +442,122 @@ func (c *githubClient) CreateFile(
 		WithField("file", path).
 		Info("pushing")
 
-	if defBranch != branch && branch != "" {
-		_, res, err := githubDo(ctx, func() (*github.Branch, *github.Response, error) {
-			return c.client.Repositories.GetBranch(ctx, repo.Owner, repo.Name, branch, 100)
+	// 1. Create a blob for the file
+	encoded := base64.StdEncoding.EncodeToString(content)
+	encoding := "base64"
+	blob, _, err := githubDo(ctx, func() (*github.Blob, *github.Response, error) {
+		return c.client.Git.CreateBlob(ctx, repo.Owner, repo.Name, github.Blob{
+			Content:  &encoded,
+			Encoding: &encoding,
 		})
-		if err != nil && (res == nil || res.StatusCode != http.StatusNotFound) {
-			return fmt.Errorf("could not get branch %q: %w", branch, err)
-		}
-
-		if res != nil && res.StatusCode == http.StatusNotFound {
-			defRef, _, err := githubDo(ctx, func() (*github.Reference, *github.Response, error) {
-				return c.client.Git.GetRef(ctx, repo.Owner, repo.Name, "refs/heads/"+defBranch)
-			})
-			if err != nil {
-				return fmt.Errorf("could not get ref %q: %w", "refs/heads/"+defBranch, err)
-			}
-
-			_, resp, err := githubDo(ctx, func() (*github.Reference, *github.Response, error) {
-				return c.client.Git.CreateRef(ctx, repo.Owner, repo.Name, github.CreateRef{
-					Ref: "refs/heads/" + branch,
-					SHA: defRef.Object.GetSHA(),
-				})
-			})
-			if err != nil {
-				rerr := new(github.ErrorResponse)
-				if !errors.As(err, &rerr) || rerr.Message != "Reference already exists" {
-					return fmt.Errorf("could not create ref %q from %q: %w: %s", "refs/heads/"+branch, defRef.Object.GetSHA(), err, bodyOf(resp))
-				}
-			}
-		}
+	})
+	if err != nil {
+		return fmt.Errorf("could not create blob for %q: %w", path, err)
 	}
 
-	file, res, err := githubDo(ctx, func() (*github.RepositoryContent, *github.Response, error) {
-		content, _, r, err := c.client.Repositories.GetContents(
-			ctx,
-			repo.Owner,
-			repo.Name,
-			path,
-			&github.RepositoryContentGetOptions{
-				Ref: branch,
-			},
-		)
-		return content, r, err
+	// 2. Get the base ref
+	ref, res, err := githubDo(ctx, func() (*github.Reference, *github.Response, error) {
+		return c.client.Git.GetRef(ctx, repo.Owner, repo.Name, "refs/heads/"+branch)
 	})
 	if err != nil && (res == nil || res.StatusCode != http.StatusNotFound) {
-		return fmt.Errorf("could not get %q: %w", path, err)
+		return fmt.Errorf("could not get ref %q: %w", "refs/heads/"+branch, err)
 	}
 
-	if file != nil {
-		options.SHA = file.SHA
+	var baseRef *github.Reference
+	if res != nil && res.StatusCode == http.StatusNotFound {
+		defRef, _, err := githubDo(ctx, func() (*github.Reference, *github.Response, error) {
+			return c.client.Git.GetRef(ctx, repo.Owner, repo.Name, "refs/heads/"+defBranch)
+		})
+		if err != nil {
+			return fmt.Errorf("could not get ref %q: %w", "refs/heads/"+defBranch, err)
+		}
+		baseRef = defRef
+	} else {
+		baseRef = ref
 	}
-	if _, _, err := githubDo(ctx, func() (*github.RepositoryContentResponse, *github.Response, error) {
-		return c.client.Repositories.UpdateFile(
-			ctx,
-			repo.Owner,
-			repo.Name,
-			path,
-			options,
-		)
-	}); err != nil {
-		return fmt.Errorf("could not update %q: %w", path, err)
+
+	// 3. Get the base commit
+	var baseCommitSHA string
+	if baseRef.GetObject() != nil {
+		baseCommitSHA = baseRef.GetObject().GetSHA()
 	}
+	baseCommit, _, err := githubDo(ctx, func() (*github.Commit, *github.Response, error) {
+		return c.client.Git.GetCommit(ctx, repo.Owner, repo.Name, baseCommitSHA)
+	})
+	if err != nil {
+		return fmt.Errorf("could not get commit %q: %w", baseCommitSHA, err)
+	}
+
+	// 4. Create a new tree
+	var baseTreeSHA string
+	if baseCommit != nil && baseCommit.GetTree() != nil {
+		baseTreeSHA = baseCommit.GetTree().GetSHA()
+	}
+	var blobSHA string
+	if blob != nil {
+		blobSHA = blob.GetSHA()
+	}
+
+	mode := "100644"
+	blobType := "blob"
+	tree, _, err := githubDo(ctx, func() (*github.Tree, *github.Response, error) {
+		return c.client.Git.CreateTree(ctx, repo.Owner, repo.Name, baseTreeSHA, []*github.TreeEntry{
+			{
+				Path: &path,
+				Mode: &mode,
+				Type: &blobType,
+				SHA:  &blobSHA,
+			},
+		})
+	})
+	if err != nil {
+		return fmt.Errorf("could not create tree for %q: %w", path, err)
+	}
+
+	// 5. Create a new commit
+	var parents []*github.Commit
+	if baseCommit != nil {
+		parents = append(parents, baseCommit)
+	}
+	newCommit, _, err := githubDo(ctx, func() (*github.Commit, *github.Response, error) {
+		return c.client.Git.CreateCommit(ctx, repo.Owner, repo.Name, github.Commit{
+			Message:   &message,
+			Tree:      tree,
+			Parents:   parents,
+			Author:    committer,
+			Committer: committer,
+		}, &github.CreateCommitOptions{})
+	})
+	if err != nil {
+		return fmt.Errorf("could not create commit: %w", err)
+	}
+
+	// 6. Update or create the ref
+	if res != nil && res.StatusCode == http.StatusNotFound {
+		_, resp, err := githubDo(ctx, func() (*github.Reference, *github.Response, error) {
+			return c.client.Git.CreateRef(ctx, repo.Owner, repo.Name, github.CreateRef{
+				Ref: "refs/heads/" + branch,
+				SHA: newCommit.GetSHA(),
+			})
+		})
+		if err != nil {
+			rerr := new(github.ErrorResponse)
+			if !errors.As(err, &rerr) || rerr.Message != "Reference already exists" {
+				return fmt.Errorf("could not create ref %q from %q: %w: %s", "refs/heads/"+branch, newCommit.GetSHA(), err, bodyOf(resp))
+			}
+		}
+	} else {
+		_, resp, err := githubDo(ctx, func() (*github.Reference, *github.Response, error) {
+			return c.client.Git.UpdateRef(ctx, repo.Owner, repo.Name, "refs/heads/"+branch, github.UpdateRef{
+				SHA:   newCommit.GetSHA(),
+				Force: new(bool),
+			})
+		})
+		if err != nil {
+			return fmt.Errorf("could not update ref %q to %q: %w: %s", "refs/heads/"+branch, newCommit.GetSHA(), err, bodyOf(resp))
+		}
+	}
+
 	return nil
 }
 
