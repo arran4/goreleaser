@@ -796,7 +796,7 @@ func TestTemplateScenarios(t *testing.T) {
 			name: "scenario_doexe",
 			doexe: []installItemData{
 				{Source: "custom_bin", Target: "/opt/custom/custom_bin", Dir: "/opt/custom", Base: "custom_bin"},
-				{Source: "renamed_bin_x86", Target: "/opt/other/renamed_bin", Dir: "/opt/other", Base: "renamed_bin"},
+				{Source: "renamed_bin_x86", Target: "/opt/other/renamed_bin", Dir: "/opt/other", Base: "renamed_bin", Keywords: []string{"amd64"}},
 				{Source: "default_bin", Target: "", Dir: "", Base: ""},
 			},
 		},
@@ -827,6 +827,7 @@ func TestTemplateScenarios(t *testing.T) {
 				Dosbin        []installItemData
 				Dosym         []installItemData
 				Systemd       []installItemData
+				Eclasses      []string
 			}{
 				InstallGroups: tc.installGroups,
 				Doexe:         tc.doexe,
@@ -834,7 +835,7 @@ func TestTemplateScenarios(t *testing.T) {
 				UseFlags:      gentooUseFlags(config.Gentoo{}),
 			}
 			var buf bytes.Buffer
-			err := template.Must(template.New("ebuild").Parse(tmplStr)).Execute(&buf, data)
+			err := template.Must(template.New("ebuild").Funcs(template.FuncMap{"escape": shellEscape}).Parse(tmplStr)).Execute(&buf, data)
 			require.NoError(t, err)
 			golden.RequireEqualTxt(t, buf.Bytes())
 		})
@@ -934,6 +935,9 @@ func TestGentooVersionPMSOrdering(t *testing.T) {
 		// Equal versions
 		{"foo-1.0.0.ebuild", "foo-1.0.0.ebuild", 0},
 		{"foo-1.0_p1-r2.ebuild", "foo-1.0_p1-r2.ebuild", 0},
+
+		// Chained suffixes
+		{"foo-1.0_alpha1_p1.ebuild", "foo-1.0_alpha1_p2.ebuild", -1},
 	}
 
 	for _, tt := range tests {
@@ -1295,18 +1299,174 @@ func TestSkipUpload(t *testing.T) {
 	})
 }
 
-func TestMetaCache(t *testing.T) {
-	t.Run("meta_cache enabled", func(t *testing.T) {
+func TestConflictResolutionFail(t *testing.T) {
+	t.Run("succeeds when publishing a new version alongside existing ebuilds", func(t *testing.T) {
 		dist := t.TempDir()
 		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
 			Dist:        dist,
 			ProjectName: "foo",
 			Gentoos: []config.Gentoo{{
-				Category:  "app-misc",
-				Name:      "foo",
-				Bin:       true,
-				License:   "MIT",
-				MetaCache: true,
+				Category:           "app-misc",
+				Name:               "foo",
+				Bin:                true,
+				License:            "MIT",
+				Description:        "foo",
+				ConflictResolution: config.ConflictResolutionFail,
+			}},
+		}, testctx.WithVersion("2.0.0"))
+
+		artPath := filepath.Join(dist, "foo_2.0.0_linux_amd64.tar.gz")
+		require.NoError(t, os.WriteFile(artPath, []byte("content"), 0o644))
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "foo_2.0.0_linux_amd64.tar.gz",
+			Path:   artPath,
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+
+		groups, err := collectPublishGroups(ctx)
+		require.NoError(t, err)
+		require.Len(t, groups, 1)
+
+		clientMock := &client.Mock{
+			DirFiles: map[string][]string{
+				"app-misc/foo-bin": {"foo-bin-1.0.0.ebuild"},
+			},
+		}
+
+		require.NoError(t, groups[0].publish(ctx, clientMock))
+	})
+
+	t.Run("fails when generated ebuild filename already exists", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "foo",
+			Gentoos: []config.Gentoo{{
+				Category:           "app-misc",
+				Name:               "foo",
+				Bin:                true,
+				License:            "MIT",
+				Description:        "foo",
+				ConflictResolution: config.ConflictResolutionFail,
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		artPath := filepath.Join(dist, "foo_1.0.0_linux_amd64.tar.gz")
+		require.NoError(t, os.WriteFile(artPath, []byte("content"), 0o644))
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "foo_1.0.0_linux_amd64.tar.gz",
+			Path:   artPath,
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+
+		groups, err := collectPublishGroups(ctx)
+		require.NoError(t, err)
+		require.Len(t, groups, 1)
+
+		clientMock := &client.Mock{
+			DirFiles: map[string][]string{
+				"app-misc/foo-bin": {"foo-bin-1.0.0.ebuild"},
+			},
+		}
+
+		err = groups[0].publish(ctx, clientMock)
+		require.EqualError(t, err, "ebuild foo-bin-1.0.0.ebuild already exists in app-misc/foo-bin")
+	})
+
+	t.Run("fails when generated ebuild filename is in thick Manifest", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "foo",
+			Gentoos: []config.Gentoo{{
+				Category:           "app-misc",
+				Name:               "foo",
+				Bin:                true,
+				License:            "MIT",
+				Description:        "foo",
+				ConflictResolution: config.ConflictResolutionFail,
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		artPath := filepath.Join(dist, "foo_1.0.0_linux_amd64.tar.gz")
+		require.NoError(t, os.WriteFile(artPath, []byte("content"), 0o644))
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "foo_1.0.0_linux_amd64.tar.gz",
+			Path:   artPath,
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+
+		groups, err := collectPublishGroups(ctx)
+		require.NoError(t, err)
+		require.Len(t, groups, 1)
+
+		clientMock := &client.Mock{
+			Files: map[string][]byte{
+				"metadata/layout.conf":      []byte("thin-manifests = false\n"),
+				"app-misc/foo-bin/Manifest": []byte("EBUILD foo-bin-1.0.0.ebuild 100 SHA256 abc\n"),
+			},
+		}
+
+		err = groups[0].publish(ctx, clientMock)
+		require.EqualError(t, err, "ebuild foo-bin-1.0.0.ebuild already exists in app-misc/foo-bin")
+	})
+}
+
+func TestMetaCache(t *testing.T) {
+	t.Run("meta_cache disabled by default", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "foo",
+			Gentoos: []config.Gentoo{{
+				Category: "app-misc",
+				Name:     "foo",
+				Bin:      true,
+				License:  "MIT",
+			}},
+		}, testctx.WithVersion("1.0.0"))
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "foo_1.0.0_linux_amd64.tar.gz",
+			Path:   "dist/foo_1.0.0_linux_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+		})
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.False(t, ctx.Config.Gentoos[0].MetaCache)
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+		cacheFile := filepath.Join(dist, "gentoo", "default", "metadata", "md5-cache", "app-misc", "foo-bin-1.0.0")
+		_, err := os.Stat(cacheFile)
+		require.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("meta_cache enabled on ebuild without eclasses generates best-effort cache", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "foo",
+			Gentoos: []config.Gentoo{{
+				Category:    "app-misc",
+				Name:        "foo",
+				Bin:         true,
+				License:     "MIT",
+				Description: "foo package",
+				MetaCache:   true,
 			}},
 		}, testctx.WithVersion("1.0.0"))
 		ctx.Artifacts.Add(&artifact.Artifact{
@@ -1321,10 +1481,41 @@ func TestMetaCache(t *testing.T) {
 		cacheFile := filepath.Join(dist, "gentoo", "default", "metadata", "md5-cache", "app-misc", "foo-bin-1.0.0")
 		content, err := os.ReadFile(cacheFile)
 		require.NoError(t, err)
-		require.Contains(t, string(content), "DEFINED_PHASES=install")
-		require.NotContains(t, string(content), "INHERITED=")
-		require.Contains(t, string(content), "IUSE=\n")
-		require.Contains(t, string(content), "_md5_=")
+		str := string(content)
+		require.Contains(t, str, "DEFINED_PHASES=install")
+		require.Contains(t, str, "DESCRIPTION=foo package")
+		require.NotContains(t, str, "INHERITED=")
+		require.NotContains(t, str, "_eclasses_=")
+		require.Contains(t, str, "_md5_=")
+	})
+
+	t.Run("meta_cache enabled on ebuild with inherited eclasses skips cache generation", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "foo",
+			Gentoos: []config.Gentoo{{
+				Category:    "app-misc",
+				Name:        "foo",
+				Bin:         true,
+				License:     "MIT",
+				Description: "foo package",
+				MetaCache:   true,
+				Systemd:     []config.GentooInstallItem{{Src: "foo.service"}},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "foo_1.0.0_linux_amd64.tar.gz",
+			Path:   "dist/foo_1.0.0_linux_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+		})
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+		cacheFile := filepath.Join(dist, "gentoo", "default", "metadata", "md5-cache", "app-misc", "foo-bin-1.0.0")
+		_, err := os.Stat(cacheFile)
+		require.True(t, os.IsNotExist(err))
 	})
 
 	t.Run("meta_cache disabled by layout.conf", func(t *testing.T) {
@@ -1338,6 +1529,40 @@ func TestMetaCache(t *testing.T) {
 		metaCacheAllowed := !settings.hasCacheFormatsConfigured || slices.Contains(settings.cacheFormats, "md5-dict") || slices.Contains(settings.cacheFormats, "md5-cache")
 		require.False(t, metaCacheAllowed)
 	})
+
+	t.Run("meta_cache filter properly applies with overlay path", func(t *testing.T) {
+		repoClient := client.NewMock()
+		repoClient.Files = map[string][]byte{
+			"metadata/layout.conf": []byte("cache-formats = pms\n"),
+		}
+
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
+
+		g := publishGroup{
+			cfg: config.Gentoo{
+				Name:        "foo",
+				Category:    "app-misc",
+				MetaCache:   true,
+				OverlayPath: "my-overlay",
+				CommitAuthor: config.CommitAuthor{
+					Name:  "Test",
+					Email: "test@test.com",
+				},
+				CommitMessageTemplate: "test",
+			},
+			files: []client.RepoFile{
+				{Path: "my-overlay/metadata/md5-cache/app-misc/foo-1.0.0", Content: []byte("cache")},
+				{Path: "my-overlay/app-misc/foo/foo-1.0.0.ebuild", Content: []byte("ebuild")},
+			},
+		}
+
+		err := g.publish(ctx, repoClient)
+		require.NoError(t, err)
+
+		require.Len(t, g.files, 2)
+		require.Equal(t, "my-overlay/app-misc/foo/foo-1.0.0.ebuild", g.files[0].Path)
+		require.Equal(t, "my-overlay/app-misc/foo/Manifest", g.files[1].Path)
+	})
 }
 
 func TestEbuildDeleter(t *testing.T) {
@@ -1346,6 +1571,7 @@ func TestEbuildDeleter(t *testing.T) {
 		var deleted []string
 		deleter := &ebuildDeleter{
 			dir:            "app-misc/foo-bin",
+			metaCacheDir:   "metadata/md5-cache/app-misc",
 			files:          &files,
 			deletedEbuilds: &deleted,
 		}
@@ -1364,7 +1590,7 @@ func TestEbuildDeleter(t *testing.T) {
 		var deleted []string
 		deleter := &ebuildDeleter{
 			dir:            "app-misc/foo-bin",
-			category:       "app-misc",
+			metaCacheDir:   "metadata/md5-cache/app-misc",
 			metaCacheFiles: map[string]struct{}{"foo-bin-1.0.0": {}},
 			files:          &files,
 			deletedEbuilds: &deleted,
@@ -1441,6 +1667,18 @@ func TestEbuildData(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, content, `DESCRIPTION="Foo package"`)
 		require.Contains(t, content, `HOMEPAGE="https://example.com"`)
+	})
+
+	t.Run("RenderEbuild with custom eclasses", func(t *testing.T) {
+		data := ebuildData{
+			Name:        "foo",
+			Description: "Foo package",
+			License:     "MIT",
+			Eclasses:    []string{"desktop", "systemd"},
+		}
+		content, err := data.RenderEbuild()
+		require.NoError(t, err)
+		require.Contains(t, content, "inherit desktop systemd")
 	})
 
 	t.Run("RenderMetaCache", func(t *testing.T) {
@@ -1578,12 +1816,15 @@ func TestUpdateVersions(t *testing.T) {
 			},
 		}
 		g := &publishGroup{
+			cfg: config.Gentoo{Category: "app-misc"},
 			files: []client.RepoFile{
 				{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\nDESCRIPTION=\"new\"\n")},
+				{Path: "metadata/md5-cache/app-misc/foo-1.0.0", Content: []byte("cache")},
 			},
 		}
 		g.updateVersions(ctx, dl, stateRepo, "app-misc/foo", "foo-", []string{"foo-1.0.0.ebuild", "foo-1.0.0-r1.ebuild"})
 		require.Equal(t, "app-misc/foo/foo-1.0.0-r2.ebuild", g.files[0].Path)
+		require.Equal(t, "metadata/md5-cache/app-misc/foo-1.0.0-r2", g.files[1].Path)
 	})
 
 	t.Run("existing ebuild matches but extra file content changed bumps revision", func(t *testing.T) {
@@ -1838,4 +2079,284 @@ func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
 		}
 		require.False(t, suppressed["unsuppressed_id"])
 	})
+
+	t.Run("unknown src_id returns error", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "myapp",
+			Gentoos: []config.Gentoo{{
+				Category:    "app-misc",
+				Name:        "myapp",
+				Bin:         true,
+				License:     "MIT",
+				Description: "foo",
+				Doexe: []config.GentooInstallItem{{
+					SrcID: "cgi_typo",
+				}},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "myapp.tar.gz",
+			Path:   "dist/myapp.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID: "default",
+			},
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
+		require.ErrorContains(t, err, `gentoo doexe: src_id "cgi_typo" does not match a selected archive`)
+	})
+
+	t.Run("multiple binaries with dst returns error", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "myapp",
+			Gentoos: []config.Gentoo{{
+				Category:    "app-misc",
+				Name:        "myapp",
+				Bin:         true,
+				License:     "MIT",
+				Description: "foo",
+				Doexe: []config.GentooInstallItem{{
+					SrcID: "tools",
+					Dst:   "/opt/bin/tool",
+				}},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "tools.tar.gz",
+			Path:   "dist/tools.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:       "tools",
+				artifact.ExtraBinaries: []string{"foo", "bar"},
+			},
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
+		require.ErrorContains(t, err, `gentoo doexe: dst "/opt/bin/tool" cannot be used with multiple binaries [foo bar] in src_id "tools"; specify explicit src for each binary`)
+	})
+
+	t.Run("mismatched archive layouts across architectures returns error", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "myapp",
+			Gentoos: []config.Gentoo{{
+				Category:    "app-misc",
+				Name:        "myapp",
+				Bin:         true,
+				License:     "MIT",
+				Description: "foo",
+				Doexe: []config.GentooInstallItem{{
+					SrcID: "default",
+				}},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "myapp_amd64.tar.gz",
+			Path:   "dist/myapp_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:        "default",
+				artifact.ExtraWrappedIn: "dir_amd64",
+			},
+		})
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "myapp_arm64.tar.gz",
+			Path:   "dist/myapp_arm64.tar.gz",
+			Goos:   "linux",
+			Goarch: "arm64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:        "default",
+				artifact.ExtraWrappedIn: "dir_arm64",
+			},
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
+		require.ErrorContains(t, err, `gentoo doexe: src_id "default" has mismatched archive layouts across architectures; specify explicit src`)
+	})
+
+	t.Run("doexe with archs avoids mismatched layouts error and generates conditionals", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "myapp",
+			Gentoos: []config.Gentoo{{
+				Category:    "app-misc",
+				Name:        "myapp",
+				Bin:         true,
+				License:     "MIT",
+				Description: "foo",
+				Doexe: []config.GentooInstallItem{
+					{SrcID: "default", Archs: []string{"amd64"}},
+					{SrcID: "default", Archs: []string{"arm64"}},
+				},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "myapp_amd64.tar.gz",
+			Path:   "dist/myapp_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:        "default",
+				artifact.ExtraWrappedIn: "dir_amd64",
+			},
+		})
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "myapp_arm64.tar.gz",
+			Path:   "dist/myapp_arm64.tar.gz",
+			Goos:   "linux",
+			Goarch: "arm64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:        "default",
+				artifact.ExtraWrappedIn: "dir_arm64",
+			},
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+
+		ebuildPath := filepath.Join(dist, "gentoo", "default", "app-misc", "myapp-bin", "myapp-bin-1.0.0.ebuild")
+		content, err := os.ReadFile(ebuildPath)
+		require.NoError(t, err)
+		str := string(content)
+
+		require.Contains(t, str, "if use amd64; then\n  exeinto /opt/bin\n  doexe \"dir_amd64/myapp\"\n  fi")
+		require.Contains(t, str, "if use arm64; then\n  exeinto /opt/bin\n  doexe \"dir_arm64/myapp\"\n  fi")
+	})
+
+	t.Run("plain src stays literal even with wrappedIn archive", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "myapp",
+			Gentoos: []config.Gentoo{{
+				Category:    "app-misc",
+				Name:        "myapp",
+				Bin:         true,
+				License:     "MIT",
+				Description: "foo",
+				Doexe: []config.GentooInstallItem{{
+					Src: "special/foo",
+				}},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "myapp_amd64.tar.gz",
+			Path:   "dist/myapp_amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+			Extra: map[string]any{
+				artifact.ExtraID:        "default",
+				artifact.ExtraWrappedIn: "myapp-1.0.0",
+			},
+		})
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+
+		ebuildPath := filepath.Join(dist, "gentoo", "default", "app-misc", "myapp-bin", "myapp-bin-1.0.0.ebuild")
+		content, err := os.ReadFile(ebuildPath)
+		require.NoError(t, err)
+		str := string(content)
+
+		require.Contains(t, str, `doexe "special/foo"`)
+		require.NotContains(t, str, `doexe "myapp-1.0.0/special/foo"`)
+	})
+}
+
+func TestEbuildGenerationDeterminism(t *testing.T) {
+	generateEbuild := func(reverseArtifactOrder bool) string {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "myapp",
+			Gentoos: []config.Gentoo{{
+				Category:    "app-misc",
+				Name:        "myapp",
+				Bin:         true,
+				License:     "MIT",
+				Description: "foo",
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		arts := []*artifact.Artifact{
+			{
+				Name:   "myapp_arm64.tar.gz",
+				Path:   "dist/myapp_arm64.tar.gz",
+				Goos:   "linux",
+				Goarch: "arm64",
+				Type:   artifact.UploadableArchive,
+				Extra: map[string]any{
+					artifact.ExtraID:       "default",
+					artifact.ExtraBinaries: []string{"myapp-cli", "myapp-srv"},
+				},
+			},
+			{
+				Name:   "myapp_amd64.tar.gz",
+				Path:   "dist/myapp_amd64.tar.gz",
+				Goos:   "linux",
+				Goarch: "amd64",
+				Type:   artifact.UploadableArchive,
+				Extra: map[string]any{
+					artifact.ExtraID:       "default",
+					artifact.ExtraBinaries: []string{"myapp-cli", "myapp-srv"},
+				},
+			},
+			{
+				Name:   "myapp_386.tar.gz",
+				Path:   "dist/myapp_386.tar.gz",
+				Goos:   "linux",
+				Goarch: "386",
+				Type:   artifact.UploadableArchive,
+				Extra: map[string]any{
+					artifact.ExtraID:       "default",
+					artifact.ExtraBinaries: []string{"myapp-cli", "myapp-srv"},
+				},
+			},
+		}
+
+		if reverseArtifactOrder {
+			slices.Reverse(arts)
+		}
+
+		for _, art := range arts {
+			ctx.Artifacts.Add(art)
+		}
+
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+
+		ebuildPath := filepath.Join(dist, "gentoo", "default", "app-misc", "myapp-bin", "myapp-bin-1.0.0.ebuild")
+		content, err := os.ReadFile(ebuildPath)
+		require.NoError(t, err)
+		return string(content)
+	}
+
+	content1 := generateEbuild(false)
+	content2 := generateEbuild(true)
+	require.Equal(t, content1, content2)
 }

@@ -513,6 +513,7 @@ type Gentoo struct {
 	Dosbin                   []GentooInstallItem      `yaml:"dosbin,omitempty" json:"dosbin,omitempty"`
 	Dosym                    []GentooInstallItem      `yaml:"dosym,omitempty" json:"dosym,omitempty"`
 	Systemd                  []GentooInstallItem      `yaml:"systemd,omitempty" json:"systemd,omitempty"`
+	Eclasses                 []string                 `yaml:"eclasses,omitempty" json:"eclasses,omitempty"`
 }
 
 type GentooUseFlag struct {
@@ -525,6 +526,7 @@ type GentooInstallItem struct {
 	Src   string   `yaml:"src,omitempty" json:"src,omitempty"`
 	Dst   string   `yaml:"dst,omitempty" json:"dst,omitempty"`
 	Use   []string `yaml:"use,omitempty" json:"use,omitempty"`
+	Archs []string `yaml:"archs,omitempty" json:"archs,omitempty"`
 }
 
 type GentooMaintainer struct {

@@ -63,8 +63,8 @@ gentoo_overlays:
 
     # Extra files to add to the ebuild's files/ directory.
     files:
-      - src: "init.d/myproject"
-        dst: "myproject.init"
+      - glob: "init.d/myproject"
+        name_template: "myproject.init"
 
     # Skip size (< 20KB) and binary file checks for files in the files/ directory.
     #
@@ -113,11 +113,21 @@ gentoo_overlays:
     bindir: "/usr/bin"
 
     # Enable Gentoo metadata cache generation (metadata/md5-cache/<category>/<package>-<version>).
-    # Note: If the repository's metadata/layout.conf disables cache-formats (e.g. cache-formats is specified without md5-dict),
-    # metadata cache generation will be disabled automatically.
+    # Experimental / best-effort option.
+    # Note: If the generated ebuild inherits an eclass (e.g. systemd), metadata cache generation for that
+    # ebuild is skipped with a warning because full eclass evaluation is outside GoReleaser's scope.
+    # If the repository's metadata/layout.conf disables cache-formats (e.g. cache-formats without md5-dict),
+    # metadata cache generation is also skipped.
     #
     # Default: false.
-    meta_cache: true
+    # meta_cache: true
+
+    # Additional Gentoo eclasses to inherit.
+    #
+    # Default: empty.
+    # eclasses:
+    #   - desktop
+    #   - systemd
 
     # Overrides for manifest hashes. Usually derived from metadata/layout.conf.
     #
@@ -242,13 +252,18 @@ gentoo_overlays:
 
 Explicit install item lists (`dobin`, `dosbin`, `doexe`, `doins`, etc.) support `src_id` to reference a specific GoReleaser archive artifact by ID and override its installation behavior (referencing an archive artifact with `src_id` prevents its default installation mechanism):
 
-* `src`: Literal path to install.
-* `src_id`: GoReleaser archive ID supplying the executable/file.
+* `src` only: Literal path to install.
+* `src_id`: GoReleaser archive ID supplying the executable/file (must match a selected archive ID).
 * `src_id` without `src`: Derives the executable source path directly from archive artifact metadata (`ExtraBinaries` / `ExtraWrappedIn`).
-* `src_id` with `src`: Uses `src` as the specific path inside that archive artifact.
+* `src_id` with `src`: Uses `src` as the path inside that archive artifact (`ExtraWrappedIn`).
 * **Automatic Binary Suppression**: Referencing an archive artifact ID with `src_id` suppresses its default automatic binary installation, preventing duplicate installation rules. Unreferenced archive binaries continue to be installed automatically.
 * `dst`: May relocate or rename the installed executable/file in the ebuild.
 * `use`: May conditionally install the item under one or more Gentoo `USE` flags.
+* `archs`: May restrict the installation item to specific architectures (e.g. `amd64`, `arm64`). This bypasses layout mismatch errors for architectures separated across different lists.
+* **Validation & Layout Rules**:
+  - Every `src_id` must match a selected archive artifact ID.
+  - If an archive contains multiple binaries, using `dst` without an explicit `src` is prohibited (specify explicit `src` for each binary).
+  - Archive layouts (`wrap_in_directory` and binaries) must be identical across all selected architectures for a given `src_id`.
 * **Multi-Archive Architectures**: Multiple selected archive artifacts may supply binaries for the same Gentoo architecture (e.g. `amd64` supplying both a `default` binary archive and a `plugin` binary archive).
 
 ### Example

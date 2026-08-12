@@ -193,10 +193,16 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 	}
 
 	var archInfos []archData
+	slices.Sort(keywordsOrder)
+	keywordsOrder = slices.Compact(keywordsOrder)
 	for _, kw := range keywordsOrder {
+		uris := archMap[kw]
+		slices.SortFunc(uris, func(a, b archItem) int {
+			return strings.Compare(a.File, b.File)
+		})
 		archInfos = append(archInfos, archData{
 			Keyword: kw,
-			URIs:    archMap[kw],
+			URIs:    uris,
 		})
 	}
 
@@ -247,6 +253,15 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		}
 	}
 
+	for kw := range installByKw {
+		slices.SortFunc(installByKw[kw], func(a, b installData) int {
+			if c := strings.Compare(a.Source, b.Source); c != 0 {
+				return c
+			}
+			return strings.Compare(a.Target, b.Target)
+		})
+	}
+
 	var installGroups []installGroup
 	if len(installByKw) > 0 {
 		groupMap := make(map[string][]string)
@@ -266,7 +281,15 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 			installItemsMap[groupKey] = installs
 		}
 
-		for groupKey, kws := range groupMap {
+		groupKeys := make([]string, 0, len(groupMap))
+		for groupKey := range groupMap {
+			groupKeys = append(groupKeys, groupKey)
+		}
+		slices.Sort(groupKeys)
+
+		for _, groupKey := range groupKeys {
+			kws := groupMap[groupKey]
+			slices.Sort(kws)
 			installs := installItemsMap[groupKey]
 			for i := range installs {
 				installs[i].Keywords = kws
@@ -295,6 +318,47 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 	}
 	useFlags := gentooUseFlags(cfg)
 
+	dobin, err := ef.buildInstallItems("dobin", cfg.Dobin)
+	if err != nil {
+		return err
+	}
+	doconfd, err := ef.buildInstallItems("doconfd", cfg.Doconfd)
+	if err != nil {
+		return err
+	}
+	doenvd, err := ef.buildInstallItems("doenvd", cfg.Doenvd)
+	if err != nil {
+		return err
+	}
+	doexe, err := ef.buildInstallItems("doexe", cfg.Doexe)
+	if err != nil {
+		return err
+	}
+	doheader, err := ef.buildInstallItems("doheader", cfg.Doheader)
+	if err != nil {
+		return err
+	}
+	doinitd, err := ef.buildInstallItems("doinitd", cfg.Doinitd)
+	if err != nil {
+		return err
+	}
+	doins, err := ef.buildInstallItems("doins", cfg.Doins)
+	if err != nil {
+		return err
+	}
+	dosbin, err := ef.buildInstallItems("dosbin", cfg.Dosbin)
+	if err != nil {
+		return err
+	}
+	dosym, err := ef.buildInstallItems("dosym", cfg.Dosym)
+	if err != nil {
+		return err
+	}
+	systemd, err := ef.buildInstallItems("systemd", cfg.Systemd)
+	if err != nil {
+		return err
+	}
+
 	data := ebuildData{
 		Name:          cfg.Name,
 		Description:   cfg.Description,
@@ -306,20 +370,29 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		Archs:         archInfos,
 		InstallGroups: installGroups,
 		UseFlags:      useFlags,
-		Dobin:         ef.buildInstallItems(cfg.Dobin),
-		Doconfd:       ef.buildInstallItems(cfg.Doconfd),
+		Dobin:         dobin,
+		Doconfd:       doconfd,
 		Dodir:         cfg.Dodir,
 		Dodoc:         ef.processStringArray(cfg.Dodoc),
-		Doenvd:        ef.buildInstallItems(cfg.Doenvd),
-		Doexe:         ef.buildInstallItems(cfg.Doexe),
-		Doheader:      ef.buildInstallItems(cfg.Doheader),
-		Doinitd:       ef.buildInstallItems(cfg.Doinitd),
-		Doins:         ef.buildInstallItems(cfg.Doins),
+		Doenvd:        doenvd,
+		Doexe:         doexe,
+		Doheader:      doheader,
+		Doinitd:       doinitd,
+		Doins:         doins,
 		Doman:         ef.processStringArray(cfg.Doman),
-		Dosbin:        ef.buildInstallItems(cfg.Dosbin),
-		Dosym:         ef.buildInstallItems(cfg.Dosym),
-		Systemd:       ef.buildInstallItems(cfg.Systemd),
+		Dosbin:        dosbin,
+		Dosym:         dosym,
+		Systemd:       systemd,
 	}
+
+	var eclasses []string
+	eclasses = append(eclasses, cfg.Eclasses...)
+	if len(systemd) > 0 && !slices.Contains(eclasses, "systemd") {
+		eclasses = append(eclasses, "systemd")
+	}
+	slices.Sort(eclasses)
+	eclasses = slices.Compact(eclasses)
+	data.Eclasses = eclasses
 
 	if err := data.Validate(); err != nil {
 		return err
@@ -351,29 +424,35 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 
 	if cfg.MetaCache {
 		pkgVer := strings.TrimSuffix(filepath.Base(path), ".ebuild")
-		metaCachePath := filepath.ToSlash(filepath.Join("metadata", "md5-cache", cfg.Category, pkgVer))
-		if cfg.OverlayPath != "" {
-			metaCachePath = filepath.ToSlash(filepath.Join(cfg.OverlayPath, metaCachePath))
-		}
-		metaCacheDistPath := filepath.Join(ctx.Config.Dist, "gentoo", cfg.ID, metaCachePath)
+		if data.HasEclasses() {
+			log.Warnf("gentoo: meta_cache is enabled for %q, but ebuild %q inherits eclasses; skipping metadata cache generation", cfg.ID, pkgVer)
+		} else {
+			metaCachePath := filepath.ToSlash(filepath.Join("metadata", "md5-cache", cfg.Category, pkgVer))
+			if cfg.OverlayPath != "" {
+				metaCachePath = filepath.ToSlash(filepath.Join(cfg.OverlayPath, metaCachePath))
+			}
+			metaCacheDistPath := filepath.Join(ctx.Config.Dist, "gentoo", cfg.ID, metaCachePath)
 
-		metaContent := generateMetaCacheContent(data, content)
-		if err := os.MkdirAll(filepath.Dir(metaCacheDistPath), 0o755); err != nil {
-			return err
+			metaContent := generateMetaCacheContent(data, content)
+			if metaContent != "" {
+				if err := os.MkdirAll(filepath.Dir(metaCacheDistPath), 0o755); err != nil {
+					return err
+				}
+				if err := os.WriteFile(metaCacheDistPath, []byte(metaContent), 0o644); err != nil {
+					return err
+				}
+				ctx.Artifacts.Add(&artifact.Artifact{
+					Name: pkgVer,
+					Path: metaCacheDistPath,
+					Type: artifact.GentooFile,
+					Extra: map[string]any{
+						ebuildExtra:     cfg,
+						ebuildPathExtra: metaCachePath,
+						ebuildMetaCache: true,
+					},
+				})
+			}
 		}
-		if err := os.WriteFile(metaCacheDistPath, []byte(metaContent), 0o644); err != nil {
-			return err
-		}
-		ctx.Artifacts.Add(&artifact.Artifact{
-			Name: pkgVer,
-			Path: metaCacheDistPath,
-			Type: artifact.GentooFile,
-			Extra: map[string]any{
-				ebuildExtra:     cfg,
-				ebuildPathExtra: metaCachePath,
-				ebuildMetaCache: true,
-			},
-		})
 	}
 
 	return nil
@@ -475,7 +554,18 @@ func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient cl
 		case config.ConflictResolutionOverwrite:
 			// overwrites by default, no specific action required
 		case config.ConflictResolutionFail:
-			return nil, fmt.Errorf("ebuilds already exist for %s", prefix)
+			var newFiles []string
+			for _, f := range g.files {
+				name := filepath.Base(f.Path)
+				if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".ebuild") {
+					newFiles = append(newFiles, name)
+				}
+			}
+			for _, nf := range newFiles {
+				if slices.Contains(ebuilds, nf) {
+					return nil, fmt.Errorf("ebuild %s already exists in %s", nf, dir)
+				}
+			}
 		}
 	}
 
@@ -530,7 +620,7 @@ func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient cl
 	var deletedEbuilds []string
 	deleter := &ebuildDeleter{
 		dir:            dir,
-		category:       g.cfg.Category,
+		metaCacheDir:   metaCacheDir,
 		metaCacheFiles: metaCacheFiles,
 		files:          &g.files,
 		deletedEbuilds: &deletedEbuilds,
@@ -687,9 +777,14 @@ func (g *publishGroup) publish(ctx *context.Context, cl client.Client) error {
 		log.Warnf("gentoo.meta_cache is true for %q, but overlay metadata/layout.conf disables cache-formats", g.cfg.ID)
 	}
 
+	metaCachePrefix := "metadata/md5-cache/"
+	if g.cfg.OverlayPath != "" {
+		metaCachePrefix = filepath.ToSlash(filepath.Join(g.cfg.OverlayPath, "metadata", "md5-cache")) + "/"
+	}
+
 	var filteredFiles []client.RepoFile
 	for _, f := range g.files {
-		if strings.HasPrefix(filepath.ToSlash(f.Path), "metadata/md5-cache/") && !f.Delete && (!g.cfg.MetaCache || !metaCacheAllowed) {
+		if strings.HasPrefix(filepath.ToSlash(f.Path), metaCachePrefix) && !f.Delete && (!g.cfg.MetaCache || !metaCacheAllowed) {
 			continue
 		}
 		filteredFiles = append(filteredFiles, f)
@@ -908,5 +1003,17 @@ func (g *publishGroup) updateVersions(ctx *context.Context, dl client.FileDownlo
 		newEbuildPath := filepath.ToSlash(filepath.Join(dir, newEbuildName))
 		log.WithField("file", fName).WithField("new_file", newEbuildName).Info("ebuild content changed, bumping revision")
 		g.files[i].Path = newEbuildPath
+
+		oldMetaCachePrefix := filepath.ToSlash(filepath.Join("metadata", "md5-cache", g.cfg.Category, fmt.Sprintf("%s%s", prefix, vStr)))
+		newMetaCachePath := filepath.ToSlash(filepath.Join("metadata", "md5-cache", g.cfg.Category, fmt.Sprintf("%s%s-r%d", prefix, vStr, newRev)))
+		if g.cfg.OverlayPath != "" {
+			oldMetaCachePrefix = filepath.ToSlash(filepath.Join(g.cfg.OverlayPath, oldMetaCachePrefix))
+			newMetaCachePath = filepath.ToSlash(filepath.Join(g.cfg.OverlayPath, newMetaCachePath))
+		}
+		for j := range g.files {
+			if g.files[j].Path == oldMetaCachePrefix {
+				g.files[j].Path = newMetaCachePath
+			}
+		}
 	}
 }

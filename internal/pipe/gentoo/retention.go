@@ -160,7 +160,7 @@ func compareGentooSuffixes(s1, s2 []gentooSuffix) int {
 	return 0
 }
 
-var gentooSuffixTokenRe = regexp.MustCompile(`_(alpha|beta|pre|rc|p)(\d*)`)
+var gentooSuffixTokenRe = regexp.MustCompile(`_(alpha|beta|pre|rc|p)(\d*)$`)
 
 func parseGentooVersion(n, prefix string) *parsedGentooVersion {
 	vStr := strings.TrimSuffix(strings.TrimPrefix(n, prefix), ".ebuild")
@@ -271,7 +271,7 @@ func getVersionBucket(v *parsedGentooVersion) string {
 
 type ebuildDeleter struct {
 	dir            string
-	category       string
+	metaCacheDir   string
 	metaCacheFiles map[string]struct{}
 	files          *[]client.RepoFile
 	deletedEbuilds *[]string
@@ -284,7 +284,7 @@ func (d *ebuildDeleter) Delete(ebuildName string) {
 	if _, ok := d.metaCacheFiles[md5Name]; !ok {
 		return
 	}
-	md5CachePath := path.Join("metadata", "md5-cache", d.category, md5Name)
+	md5CachePath := path.Join(d.metaCacheDir, md5Name)
 	*d.files = append(*d.files, client.RepoFile{Path: md5CachePath, Delete: true})
 }
 
