@@ -122,7 +122,7 @@ src_install() {
 {{- template "keyword_start" .Keywords }}
 {{- template "use_start" .Use }}
 {{- if .Target }}
-  exeinto "{{ .Dir }}"
+  exeinto {{ if .Dir }}"{{ .Dir }}"{{ else }}{{ $.Bindir }}{{ end }}
   {{- if eq .Source .Base }}
   doexe "{{ .Source }}"
   {{- else }}
