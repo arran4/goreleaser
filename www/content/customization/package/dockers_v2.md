@@ -5,8 +5,6 @@ weight: 130
 
 {{< g_version "v2.12" >}}
 
-{{< g_experimental "https://github.com/goreleaser/goreleaser/discussions/6005" >}}
-
 This feature uses `docker buildx` to build multi-arch manifests,
 reusing the previously built binaries and/or packages.
 
@@ -42,6 +40,7 @@ dockers_v2:
     # not available.
     #
     # Templates: allowed (both the path and the file contents).
+    # {{< g_inline_pro >}}
     # {{< g_inline_version "v2.17" >}}
     templated_dockerfile: "Dockerfile.tmpl"
 
@@ -69,6 +68,7 @@ dockers_v2:
     #
     # Empty tags are ignored.
     #
+    # Default: '{{.Tag}}'.
     # Templates: allowed.
     tags:
       - "v{{ .Version }}"
@@ -94,6 +94,7 @@ dockers_v2:
     # when rendering the file contents.
     #
     # Templates: allowed (source path, destination path, and file contents).
+    # {{< g_inline_pro >}}
     # {{< g_inline_version "v2.17" >}}
     templated_extra_files:
       - # Source file path (relative to the project root).
@@ -191,7 +192,7 @@ dockers_v2:
           dir: "{{ .ContextDir }}"
           # Only run this hook if the template evaluates to `true`.
           # {{< g_inline_version "v2.17" >}}
-          if: "{{ eq .Runtime.Goarch \"amd64\" }}"
+          if: '{{ eq .Runtime.Goarch "amd64" }}'
           # Extra env vars to inject into the hook.
           env:
             - DOCKERFILE={{ .Dockerfile }}

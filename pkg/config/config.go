@@ -371,6 +371,28 @@ type Winget struct {
 	InstallationNotes     string             `yaml:"installation_notes,omitempty" json:"installation_notes,omitempty"`
 	Tags                  []string           `yaml:"tags,omitempty" json:"tags,omitempty"`
 	Dependencies          []WingetDependency `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
+	AdditionalLocales     []WingetLocale     `yaml:"additional_locales,omitempty" json:"additional_locales,omitempty"`
+}
+
+type WingetLocale struct {
+	Locale              string   `yaml:"locale" json:"locale"`
+	Publisher           string   `yaml:"publisher,omitempty" json:"publisher,omitempty"`
+	PublisherURL        string   `yaml:"publisher_url,omitempty" json:"publisher_url,omitempty"`
+	PublisherSupportURL string   `yaml:"publisher_support_url,omitempty" json:"publisher_support_url,omitempty"`
+	PrivacyURL          string   `yaml:"privacy_url,omitempty" json:"privacy_url,omitempty"`
+	Author              string   `yaml:"author,omitempty" json:"author,omitempty"`
+	PackageName         string   `yaml:"package_name,omitempty" json:"package_name,omitempty"`
+	Homepage            string   `yaml:"homepage,omitempty" json:"homepage,omitempty"`
+	License             string   `yaml:"license,omitempty" json:"license,omitempty"`
+	LicenseURL          string   `yaml:"license_url,omitempty" json:"license_url,omitempty"`
+	Copyright           string   `yaml:"copyright,omitempty" json:"copyright,omitempty"`
+	CopyrightURL        string   `yaml:"copyright_url,omitempty" json:"copyright_url,omitempty"`
+	ShortDescription    string   `yaml:"short_description,omitempty" json:"short_description,omitempty"`
+	Description         string   `yaml:"description,omitempty" json:"description,omitempty"`
+	Tags                []string `yaml:"tags,omitempty" json:"tags,omitempty"`
+	ReleaseNotes        string   `yaml:"release_notes,omitempty" json:"release_notes,omitempty"`
+	ReleaseNotesURL     string   `yaml:"release_notes_url,omitempty" json:"release_notes_url,omitempty"`
+	InstallationNotes   string   `yaml:"installation_notes,omitempty" json:"installation_notes,omitempty"`
 }
 
 type WingetDependency struct {
@@ -570,10 +592,10 @@ type Hook struct {
 // FormatOverride is used to specify a custom format for a specific GOOS.
 type FormatOverride struct {
 	Goos    string      `yaml:"goos,omitempty" json:"goos,omitempty"`
-	Formats StringArray `yaml:"formats,omitempty" json:"formats,omitempty" jsonschema:"enum=tar,enum=tgz,enum=tar.gz,enum=zip,enum=gz,enum=tar.xz,enum=txz,enum=binary,enum=none,default=tar.gz"`
+	Formats StringArray `yaml:"formats,omitempty" json:"formats,omitempty" jsonschema:"enum=tar,enum=tgz,enum=tar.gz,enum=zip,enum=gz,enum=tar.xz,enum=txz,enum=tar.zst,enum=tzst,enum=xz,enum=binary,enum=none,default=tar.gz"`
 
 	// Deprecated: use [Formats] instead.
-	Format string `yaml:"format,omitempty" json:"format,omitempty" jsonschema:"enum=tar,enum=tgz,enum=tar.gz,enum=zip,enum=gz,enum=tar.xz,enum=txz,enum=binary,enum=none,default=tar.gz,deprecated=true"`
+	Format string `yaml:"format,omitempty" json:"format,omitempty" jsonschema:"enum=tar,enum=tgz,enum=tar.gz,enum=zip,enum=gz,enum=tar.xz,enum=txz,enum=tar.zst,enum=tzst,enum=xz,enum=binary,enum=none,default=tar.gz,deprecated=true"`
 }
 
 // File is a file inside an archive.
@@ -624,7 +646,7 @@ type Archive struct {
 	IDs                       []string         `yaml:"ids,omitempty" json:"ids,omitempty"`
 	BuildsInfo                FileInfo         `yaml:"builds_info,omitempty" json:"builds_info,omitempty"`
 	NameTemplate              string           `yaml:"name_template,omitempty" json:"name_template,omitempty"`
-	Formats                   StringArray      `yaml:"formats,omitempty" json:"formats,omitempty" jsonschema:"enum=tar,enum=tgz,enum=tar.gz,enum=zip,enum=gz,enum=tar.xz,enum=txz,enum=binary,default=tar.gz"`
+	Formats                   StringArray      `yaml:"formats,omitempty" json:"formats,omitempty" jsonschema:"enum=tar,enum=tgz,enum=tar.gz,enum=zip,enum=gz,enum=tar.xz,enum=txz,enum=tar.zst,enum=tzst,enum=xz,enum=binary,default=tar.gz"`
 	FormatOverrides           []FormatOverride `yaml:"format_overrides,omitempty" json:"format_overrides,omitempty"`
 	WrapInDirectory           string           `yaml:"wrap_in_directory,omitempty" json:"wrap_in_directory,omitempty" jsonschema:"oneof_type=string;boolean"`
 	StripBinaryDirectory      bool             `yaml:"strip_binary_directory,omitempty" json:"strip_binary_directory,omitempty"`
@@ -633,7 +655,7 @@ type Archive struct {
 	AllowDifferentBinaryCount bool             `yaml:"allow_different_binary_count,omitempty" json:"allow_different_binary_count,omitempty"`
 
 	// Deprecated: use [Formats] instead.
-	Format string `yaml:"format,omitempty" json:"format,omitempty" jsonschema:"enum=tar,enum=tgz,enum=tar.gz,enum=zip,enum=gz,enum=tar.xz,enum=txz,enum=binary,default=tar.gz,deprecated=true"`
+	Format string `yaml:"format,omitempty" json:"format,omitempty" jsonschema:"enum=tar,enum=tgz,enum=tar.gz,enum=zip,enum=gz,enum=tar.xz,enum=txz,enum=tar.zst,enum=tzst,enum=xz,enum=binary,default=tar.gz,deprecated=true"`
 
 	// Deprecated: use [IDs] instead.
 	Builds []string `yaml:"builds,omitempty" json:"builds,omitempty" jsonschema:"deprecated=true"`
@@ -959,7 +981,10 @@ type NFPMContent struct {
 
 // SRPM config.
 type SRPM struct {
-	NFPMRPM
+	Summary          string            `yaml:"summary,omitempty" json:"summary,omitempty"`
+	Group            string            `yaml:"group,omitempty" json:"group,omitempty"`
+	Compression      string            `yaml:"compression,omitempty" json:"compression,omitempty"`
+	Signature        NFPMRPMSignature  `yaml:"signature,omitempty" json:"signature,omitempty"`
 	Enabled          bool              `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	PackageName      string            `yaml:"package_name,omitempty" json:"package_name,omitempty"`
 	Epoch            string            `yaml:"epoch,omitempty" json:"epoch,omitempty"`
