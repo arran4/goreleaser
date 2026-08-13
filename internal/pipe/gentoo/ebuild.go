@@ -58,6 +58,7 @@ type installItemData struct {
 	InstallerCmd     string
 	InstallRenameCmd string
 	DirSwitchCmd     string
+	InstallCmd       string
 }
 
 type ebuildData struct {
@@ -372,6 +373,21 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 					}
 				}
 
+				var installCmd string
+				if target != "" {
+					if installerCmd == "dosym" {
+						installCmd = fmt.Sprintf("%s %q %q", installerCmd, srcPath, target)
+					} else {
+						if srcPath == base {
+							installCmd = fmt.Sprintf("%s %q", installerCmd, srcPath)
+						} else {
+							installCmd = fmt.Sprintf("%s %q %q", installRenameCmd, srcPath, base)
+						}
+					}
+				} else {
+					installCmd = fmt.Sprintf("%s %q", installerCmd, srcPath)
+				}
+
 				items = append(items, installItemData{
 					Source:           srcPath,
 					Target:           target,
@@ -382,6 +398,7 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 					InstallerCmd:     installerCmd,
 					InstallRenameCmd: installRenameCmd,
 					DirSwitchCmd:     dirSwitchCmd,
+					InstallCmd:       installCmd,
 				})
 			} else {
 				bins := firstBins
@@ -429,6 +446,21 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 						}
 					}
 
+					var installCmd string
+					if target != "" {
+						if installerCmd == "dosym" {
+							installCmd = fmt.Sprintf("%s %q %q", installerCmd, sourcePath, target)
+						} else {
+							if sourcePath == base {
+								installCmd = fmt.Sprintf("%s %q", installerCmd, sourcePath)
+							} else {
+								installCmd = fmt.Sprintf("%s %q %q", installRenameCmd, sourcePath, base)
+							}
+						}
+					} else {
+						installCmd = fmt.Sprintf("%s %q", installerCmd, sourcePath)
+					}
+
 					items = append(items, installItemData{
 						Source:           sourcePath,
 						Target:           target,
@@ -439,6 +471,7 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 						InstallerCmd:     installerCmd,
 						InstallRenameCmd: installRenameCmd,
 						DirSwitchCmd:     dirSwitchCmd,
+						InstallCmd:       installCmd,
 					})
 				}
 			}
@@ -476,6 +509,21 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 			}
 		}
 
+		var installCmd string
+		if d.Dst != "" {
+			if installerCmd == "dosym" {
+				installCmd = fmt.Sprintf("%s %q %q", installerCmd, src, d.Dst)
+			} else {
+				if src == base {
+					installCmd = fmt.Sprintf("%s %q", installerCmd, src)
+				} else {
+					installCmd = fmt.Sprintf("%s %q %q", installRenameCmd, src, base)
+				}
+			}
+		} else {
+			installCmd = fmt.Sprintf("%s %q", installerCmd, src)
+		}
+
 		items = append(items, installItemData{
 			Source:           src,
 			Target:           d.Dst,
@@ -486,6 +534,7 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 			InstallerCmd:     installerCmd,
 			InstallRenameCmd: installRenameCmd,
 			DirSwitchCmd:     dirSwitchCmd,
+			InstallCmd:       installCmd,
 		})
 	}
 	return items, nil

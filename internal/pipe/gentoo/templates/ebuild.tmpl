@@ -75,19 +75,7 @@ src_install() {
 {{- if not $in_conditional }}{{ $lastdir = $curdir }}{{ $lastswitchcmd = .DirSwitchCmd }}{{ else }}{{ $lastdir = "" }}{{ $lastswitchcmd = "" }}{{ end }}
 {{- end }}
 {{- end }}
-{{- if .Target }}
-  {{- if eq .InstallerCmd "dosym" }}
-  {{ if .Keywords }}  {{ end }}{{ if .Use }}  {{ end }}{{ .InstallerCmd }} "{{ .Source }}" "{{ .Target }}"
-  {{- else }}
-  {{- if eq .Source .Base }}
-  {{ if .Keywords }}  {{ end }}{{ if .Use }}  {{ end }}{{ .InstallerCmd }} "{{ .Source }}"
-  {{- else }}
-  {{ if .Keywords }}  {{ end }}{{ if .Use }}  {{ end }}{{ .InstallRenameCmd }} "{{ .Source }}" "{{ .Base }}"
-  {{- end }}
-  {{- end }}
-{{- else }}
-  {{ if .Keywords }}  {{ end }}{{ if .Use }}  {{ end }}{{ .InstallerCmd }} "{{ .Source }}"
-{{- end }}
+  {{ if .Keywords }}  {{ end }}{{ if .Use }}  {{ end }}{{ .InstallCmd }}
 {{- if .Use }}
   {{ if .Keywords }}  {{ end }}fi
 {{- end }}

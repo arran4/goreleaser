@@ -843,9 +843,9 @@ func TestTemplateScenarios(t *testing.T) {
 		{
 			name: "scenario_doexe",
 			doexe: []installItemData{
-				{Source: "custom_bin", Target: "/opt/custom/custom_bin", Dir: "/opt/custom", Base: "custom_bin", InstallerCmd: "doexe", InstallRenameCmd: "newexe", DirSwitchCmd: "exeinto"},
-				{Source: "renamed_bin_x86", Target: "/opt/other/renamed_bin", Dir: "/opt/other", Base: "renamed_bin", Keywords: []string{"amd64"}, InstallerCmd: "doexe", InstallRenameCmd: "newexe", DirSwitchCmd: "exeinto"},
-				{Source: "default_bin", Target: "", Dir: "", Base: "", InstallerCmd: "doexe", InstallRenameCmd: "newexe", DirSwitchCmd: "exeinto"},
+				{Source: "custom_bin", Target: "/opt/custom/custom_bin", Dir: "/opt/custom", Base: "custom_bin", InstallerCmd: "doexe", InstallRenameCmd: "newexe", DirSwitchCmd: "exeinto", InstallCmd: `doexe "custom_bin"`},
+				{Source: "renamed_bin_x86", Target: "/opt/other/renamed_bin", Dir: "/opt/other", Base: "renamed_bin", Keywords: []string{"amd64"}, InstallerCmd: "doexe", InstallRenameCmd: "newexe", DirSwitchCmd: "exeinto", InstallCmd: `newexe "renamed_bin_x86" "renamed_bin"`},
+				{Source: "default_bin", Target: "", Dir: "", Base: "", InstallerCmd: "doexe", InstallRenameCmd: "newexe", DirSwitchCmd: "exeinto", InstallCmd: `doexe "default_bin"`},
 			},
 		},
 	}

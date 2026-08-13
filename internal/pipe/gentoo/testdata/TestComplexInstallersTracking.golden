@@ -30,6 +30,6 @@ src_install() {
   insinto /etc/foo
   doins "ins3"
   insinto /usr/lib/systemd/system
-  doins "sys1.service"
-  newins "sys2.service" "sys2-rename.service"
+  systemd_dounit "sys1.service"
+  systemd_newunit "sys2.service" "sys2-rename.service"
 }
