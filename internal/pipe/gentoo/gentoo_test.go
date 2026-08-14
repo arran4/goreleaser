@@ -1331,7 +1331,7 @@ func TestSkipUpload(t *testing.T) {
 			Path: "dist/foo.ebuild",
 			Type: artifact.GentooEbuild,
 			Extra: map[string]any{
-				ebuildExtra:     ctx.Config.Gentoos[0],
+				ebuildExtra:     gentooConfig(ctx.Config.Gentoos[0]),
 				ebuildPathExtra: "app-misc/foo/foo-1.0.0.ebuild",
 			},
 		})
@@ -1354,7 +1354,7 @@ func TestSkipUpload(t *testing.T) {
 			Path: "dist/foo.ebuild",
 			Type: artifact.GentooEbuild,
 			Extra: map[string]any{
-				ebuildExtra:     ctx.Config.Gentoos[0],
+				ebuildExtra:     gentooConfig(ctx.Config.Gentoos[0]),
 				ebuildPathExtra: "app-misc/foo/foo-1.0.0.ebuild",
 			},
 		})

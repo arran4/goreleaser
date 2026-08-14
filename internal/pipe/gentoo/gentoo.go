@@ -27,6 +27,13 @@ const (
 	ebuildMetaCache = "GentooMetaCache"
 )
 
+// gentooConfig wrapper prevents leaking secret credentials into artifacts.json
+type gentooConfig config.Gentoo
+
+func (gentooConfig) MarshalJSON() ([]byte, error) {
+	return []byte(`null`), nil
+}
+
 // Pipe builds and publishes gentoo ebuilds.
 type Pipe struct{}
 
@@ -421,7 +428,7 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		Path: path,
 		Type: artifact.GentooEbuild,
 		Extra: map[string]any{
-			ebuildExtra:     cfg,
+			ebuildExtra:     gentooConfig(cfg),
 			ebuildPathExtra: relPath,
 		},
 	})
@@ -450,7 +457,7 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 					Path: metaCacheDistPath,
 					Type: artifact.GentooFile,
 					Extra: map[string]any{
-						ebuildExtra:     cfg,
+						ebuildExtra:     gentooConfig(cfg),
 						ebuildPathExtra: metaCachePath,
 						ebuildMetaCache: true,
 					},
@@ -477,7 +484,7 @@ func collectPublishGroups(ctx *context.Context) ([]*publishGroup, error) {
 	var groups []*publishGroup
 
 	for _, art := range arts {
-		cfg := artifact.MustExtra[config.Gentoo](*art, ebuildExtra)
+		cfg := config.Gentoo(artifact.MustExtra[gentooConfig](*art, ebuildExtra))
 		skip, err := tmpl.New(ctx).Apply(cfg.SkipUpload)
 		if err != nil {
 			return nil, err
