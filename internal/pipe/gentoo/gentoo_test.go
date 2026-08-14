@@ -1178,20 +1178,24 @@ func TestGentooVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
-			got, err := gentooVersion(tt.in)
+			got, err := convertToGentooVersion(tt.in, "gentoo-version")
 			require.NoError(t, err)
 			require.Equal(t, tt.want, got)
 		})
 	}
 
 	t.Run("invalid gentoo version", func(t *testing.T) {
-		_, err := gentooVersion("1.0.0-nightly")
+		_, err := convertToGentooVersion("1.0.0-nightly", "gentoo-version")
 		require.Error(t, err)
 		require.ErrorContains(t, err, "cannot be naturally represented in Gentoo")
 
-		_, err = gentooVersion("1.0.0-dev.1")
+		_, err = convertToGentooVersion("1.0.0-dev.1", "gentoo-version")
 		require.Error(t, err)
 		require.ErrorContains(t, err, "cannot be naturally represented in Gentoo")
+
+		_, err = convertToGentooVersion("1.0.0", "invalid-type")
+		require.Error(t, err)
+		require.ErrorContains(t, err, "unsupported version representation invalid-type")
 	})
 }
 

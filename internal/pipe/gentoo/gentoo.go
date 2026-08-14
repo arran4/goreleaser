@@ -116,7 +116,7 @@ func runAll(ctx *context.Context, cl client.ReleaseURLTemplater) error {
 }
 
 func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplater) error {
-	gentooVer, err := gentooVersion(ctx.Version)
+	gentooVer, err := convertToGentooVersion(ctx.Version, "gentoo-version")
 	if err != nil {
 		return err
 	}
