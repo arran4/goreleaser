@@ -13,7 +13,7 @@ import (
 
 var gentooPrereleaseRe = regexp.MustCompile(`(?i)-(alpha|beta|pre|rc|p)[.\-]?(\d*)`)
 
-func convertToGentooVersion(v, from string) (string, error) {
+func convertToGentooVersion(v string, from string) (string, error) {
 	switch from {
 	case "gentoo-version":
 		converted := gentooPrereleaseRe.ReplaceAllStringFunc(v, func(m string) string {
