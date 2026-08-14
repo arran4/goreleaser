@@ -116,22 +116,27 @@ func runAll(ctx *context.Context, cl client.ReleaseURLTemplater) error {
 }
 
 func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplater) error {
+	gentooVer, err := gentooVersion(ctx.Version)
+	if err != nil {
+		return err
+	}
+
 	tp := tmpl.New(ctx).WithExtraFields(tmpl.Fields{
-		"GentooVersion": gentooVersion(ctx.Version),
-		"Version":       gentooVersion(ctx.Version),
+		"GentooVersion": gentooVer,
+		"Version":       gentooVer,
 		"Name":          cfg.Name,
 		"Category":      cfg.Category,
 	})
 	if err := tp.ApplyAll(&cfg.Name, &cfg.Category, &cfg.OverlayPath, &cfg.Description, &cfg.Homepage, &cfg.BugsTo, &cfg.License); err != nil {
 		return err
 	}
-	var err error
+
 	cfg.Repository, err = client.TemplateRef(tp.Apply, cfg.Repository)
 	if err != nil {
 		return err
 	}
 
-	relPath := ebuildRelPath(ctx, cfg)
+	relPath := ebuildRelPath(cfg, gentooVer)
 	if strings.HasPrefix(filepath.ToSlash(filepath.Clean(relPath)), "../") || strings.Contains(filepath.ToSlash(filepath.Clean(relPath)), "/../") {
 		return fmt.Errorf("path %q must be a relative category/package/file.ebuild path", relPath)
 	}
@@ -908,13 +913,13 @@ func packageDir(cfg config.Gentoo) string {
 	return dir
 }
 
-func ebuildRelPath(ctx *context.Context, cfg config.Gentoo) string {
+func ebuildRelPath(cfg config.Gentoo, gentooVer string) string {
 	pkgName := cfg.Name
 	if cfg.Type == "bin" && !strings.HasSuffix(pkgName, "-bin") {
 		pkgName += "-bin"
 	}
 	dir := packageDir(cfg)
-	return filepath.ToSlash(filepath.Join(dir, fmt.Sprintf("%s-%s.ebuild", pkgName, gentooVersion(ctx.Version))))
+	return filepath.ToSlash(filepath.Join(dir, fmt.Sprintf("%s-%s.ebuild", pkgName, gentooVer)))
 }
 
 func copyFile(src, dst string) error {

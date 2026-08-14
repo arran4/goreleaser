@@ -1,6 +1,7 @@
 package gentoo
 
 import (
+	"fmt"
 	"path"
 	"regexp"
 	"slices"
@@ -12,11 +13,15 @@ import (
 
 var gentooPrereleaseRe = regexp.MustCompile(`(?i)-(alpha|beta|pre|rc|p)[.\-]?(\d*)`)
 
-func gentooVersion(v string) string {
-	return gentooPrereleaseRe.ReplaceAllStringFunc(v, func(m string) string {
+func gentooVersion(v string) (string, error) {
+	converted := gentooPrereleaseRe.ReplaceAllStringFunc(v, func(m string) string {
 		match := gentooPrereleaseRe.FindStringSubmatch(m)
 		return "_" + strings.ToLower(match[1]) + match[2]
 	})
+	if parseGentooVersion(converted+".ebuild", "") == nil {
+		return "", fmt.Errorf("version %q cannot be naturally represented in Gentoo", v)
+	}
+	return converted, nil
 }
 
 type suffixKind int
