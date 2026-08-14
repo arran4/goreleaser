@@ -37,7 +37,8 @@ func (Pipe) Skip(ctx *context.Context) bool {
 }
 
 func (Pipe) Default(ctx *context.Context) error {
-	ids := ids.New("gentoo_overlays")
+	gentooIDs := ids.New("gentoo_overlays")
+	destIDs := ids.New("gentoo_package_destinations")
 	for i := range ctx.Config.Gentoos {
 		g := &ctx.Config.Gentoos[i]
 		g.CommitAuthor = commitauthor.Default(g.CommitAuthor)
@@ -93,9 +94,18 @@ func (Pipe) Default(ctx *context.Context) error {
 		if g.Category == "" {
 			g.Category = "app-misc"
 		}
-		ids.Inc(g.ID)
+		gentooIDs.Inc(g.ID)
+		repo := client.RepoFromRef(g.Repository).String()
+		if repo == "" {
+			repo = g.Repository.Git.URL
+		}
+		dest := filepath.ToSlash(filepath.Join(repo, packageDir(*g)))
+		destIDs.Inc(dest)
 	}
-	return ids.Validate()
+	if err := gentooIDs.Validate(); err != nil {
+		return err
+	}
+	return destIDs.Validate()
 }
 
 func (Pipe) Run(ctx *context.Context) error {

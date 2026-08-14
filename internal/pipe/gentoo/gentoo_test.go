@@ -2610,3 +2610,38 @@ func TestHandleGentooManifestAndMetadataPrunesFullyDeletedBaseVersions(t *testin
 	require.NotContains(t, manifestContent, "EBUILD foo-1.0.0.ebuild")
 	require.Contains(t, manifestContent, "EBUILD foo-2.0.0.ebuild")
 }
+
+func TestDuplicatePackageDestinations(t *testing.T) {
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
+	ctx.Config.Gentoos = []config.Gentoo{
+		{
+			ID:          "a",
+			Bin:         true,
+			License:     "MIT",
+			Description: "foo",
+			Repository: config.RepoRef{
+				Owner: "foo",
+				Name:  "bar",
+			},
+			Category:    "app-misc",
+			Name:        "pkg",
+			OverlayPath: "overlay",
+		},
+		{
+			ID:          "b",
+			Bin:         true,
+			License:     "MIT",
+			Description: "foo",
+			Repository: config.RepoRef{
+				Owner: "foo",
+				Name:  "bar",
+			},
+			Category:    "app-misc",
+			Name:        "pkg",
+			OverlayPath: "overlay",
+		},
+	}
+	err := Pipe{}.Default(ctx)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "found 2 gentoo_package_destinations with the ID 'foo/bar/overlay/app-misc/pkg-bin'")
+}
