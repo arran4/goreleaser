@@ -98,6 +98,32 @@ func TestDoRunSingleArch(t *testing.T) {
 	golden.RequireEqual(t, bts)
 }
 
+func TestDoRunInvalidVersionRepresentation(t *testing.T) {
+	dist := t.TempDir()
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+		Dist:        dist,
+		ProjectName: "foo",
+		Gentoos: []config.Gentoo{{
+			Name:                  "foo",
+			License:               "MIT",
+			VersionRepresentation: "invalid-rep",
+			Bin:                   true,
+		}},
+	}, testctx.WithVersion("1.0.0"))
+	ctx.Artifacts.Add(&artifact.Artifact{
+		Name:   "foo_linux_amd64",
+		Path:   "foo_linux_amd64",
+		Goos:   "linux",
+		Goarch: "amd64",
+		Type:   artifact.UploadableArchive,
+	})
+
+	require.NoError(t, Pipe{}.Default(ctx))
+	err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
+	require.Error(t, err)
+	require.ErrorContains(t, err, "unsupported version representation invalid-rep")
+}
+
 func TestDoRunRejectsRawBinaries(t *testing.T) {
 	dist := t.TempDir()
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
@@ -107,7 +133,7 @@ func TestDoRunRejectsRawBinaries(t *testing.T) {
 			Name:    "foo",
 			License: "MIT",
 		}},
-	})
+	}, testctx.WithVersion("1.0.0"))
 	ctx.Artifacts.Add(&artifact.Artifact{
 		Name:   "foo_linux_amd64",
 		Path:   "foo_linux_amd64",
@@ -333,7 +359,7 @@ func TestDefaultSetsPath(t *testing.T) {
 	require.Equal(t, "foo", ctx.Config.Gentoos[0].Name)
 	require.Equal(t, "app-misc", ctx.Config.Gentoos[0].Category)
 	require.Empty(t, ctx.Config.Gentoos[0].OverlayPath)
-	require.Equal(t, "app-misc/foo-bin/foo-bin-1.0.0.ebuild", ebuildRelPath(ctx, ctx.Config.Gentoos[0]))
+	require.Equal(t, "app-misc/foo-bin/foo-bin-1.0.0.ebuild", ebuildRelPath(ctx.Config.Gentoos[0], "1.0.0"))
 }
 
 func TestDefaultSetsPathWithCategory(t *testing.T) {
@@ -348,7 +374,7 @@ func TestDefaultSetsPathWithCategory(t *testing.T) {
 	require.NoError(t, Pipe{}.Default(ctx))
 	require.Equal(t, "app-admin", ctx.Config.Gentoos[0].Category)
 	require.Empty(t, ctx.Config.Gentoos[0].OverlayPath)
-	require.Equal(t, "app-admin/foo-bin/foo-bin-1.0.0.ebuild", ebuildRelPath(ctx, ctx.Config.Gentoos[0]))
+	require.Equal(t, "app-admin/foo-bin/foo-bin-1.0.0.ebuild", ebuildRelPath(ctx.Config.Gentoos[0], "1.0.0"))
 }
 
 func TestDefaultWithOverlayPath(t *testing.T) {
@@ -363,7 +389,7 @@ func TestDefaultWithOverlayPath(t *testing.T) {
 	}, testctx.WithVersion("1.0.0"))
 	require.NoError(t, Pipe{}.Default(ctx))
 	require.Equal(t, "my-prefix", ctx.Config.Gentoos[0].OverlayPath)
-	require.Equal(t, "my-prefix/app-admin/foo-bin/foo-bin-1.0.0.ebuild", ebuildRelPath(ctx, ctx.Config.Gentoos[0]))
+	require.Equal(t, "my-prefix/app-admin/foo-bin/foo-bin-1.0.0.ebuild", ebuildRelPath(ctx.Config.Gentoos[0], "1.0.0"))
 }
 
 func TestPathWithCategoryAndNameTemplates(t *testing.T) {
@@ -720,7 +746,7 @@ func TestDoRunByIDs(t *testing.T) {
 		Gentoos: []config.Gentoo{{
 			IDs: []string{"foo"},
 		}},
-	})
+	}, testctx.WithVersion("1.0.0"))
 	ctx.Artifacts.Add(&artifact.Artifact{
 		Name:   "bar-bin.tar.gz",
 		Path:   "doesnt matter",
@@ -1178,10 +1204,29 @@ func TestGentooVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
-			got := gentooVersion(tt.in)
+			got, err := convertToGentooVersion(tt.in, false, "gentoo-version")
+			require.NoError(t, err)
 			require.Equal(t, tt.want, got)
 		})
 	}
+
+	t.Run("invalid gentoo version", func(t *testing.T) {
+		_, err := convertToGentooVersion("1.0.0-nightly", false, "gentoo-version")
+		require.Error(t, err)
+		require.ErrorContains(t, err, "cannot be naturally represented in Gentoo")
+
+		_, err = convertToGentooVersion("1.0.0-dev.1", false, "gentoo-version")
+		require.Error(t, err)
+		require.ErrorContains(t, err, "cannot be naturally represented in Gentoo")
+
+		_, err = convertToGentooVersion("123456789012345678901234567890", false, "gentoo-version")
+		require.Error(t, err)
+		require.ErrorContains(t, err, "cannot be naturally represented in Gentoo")
+
+		_, err = convertToGentooVersion("1.0.0-r-1", false, "gentoo-version")
+		require.Error(t, err)
+		require.ErrorContains(t, err, "cannot be naturally represented in Gentoo")
+	})
 }
 
 func TestDefaultValidation(t *testing.T) {

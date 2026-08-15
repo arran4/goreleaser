@@ -1,6 +1,7 @@
 package gentoo
 
 import (
+	"fmt"
 	"path"
 	"regexp"
 	"slices"
@@ -12,11 +13,48 @@ import (
 
 var gentooPrereleaseRe = regexp.MustCompile(`(?i)-(alpha|beta|pre|rc|p)[.\-]?(\d*)`)
 
-func gentooVersion(v string) string {
-	return gentooPrereleaseRe.ReplaceAllStringFunc(v, func(m string) string {
+func validateGentooVersion(v string) bool {
+	// https://projects.gentoo.org/pms/8/pms.html#x1-250003.2
+	// Optional leading uppercase/lowercase letter handling is done outside or checked strictly
+
+	// Check pure numbers without parsing
+	parts := strings.Split(v, "_")
+	numPart := parts[0]
+
+	// Find -r if it exists
+	revIdx := strings.LastIndex(numPart, "-r")
+	if revIdx != -1 {
+		rev := numPart[revIdx+2:]
+		// must be pure digits, no negative
+		if !regexp.MustCompile(`^[0-9]+$`).MatchString(rev) {
+			return false
+		}
+		numPart = numPart[:revIdx]
+	}
+
+	// letter
+	if len(numPart) > 0 && numPart[len(numPart)-1] >= 'a' && numPart[len(numPart)-1] <= 'z' {
+		numPart = numPart[:len(numPart)-1]
+	}
+
+	return regexp.MustCompile(`^[0-9]+(\.[0-9]+)*$`).MatchString(numPart)
+}
+
+func convertToGentooVersion(v string, isSnapshot bool, from string) (string, error) {
+	if from != "gentoo-version" {
+		return "", fmt.Errorf("unsupported version representation %v", from)
+	}
+	if isSnapshot {
+		return "9999", nil
+	}
+	converted := gentooPrereleaseRe.ReplaceAllStringFunc(v, func(m string) string {
 		match := gentooPrereleaseRe.FindStringSubmatch(m)
 		return "_" + strings.ToLower(match[1]) + match[2]
 	})
+	if !validateGentooVersion(converted) || parseGentooVersion(converted+".ebuild", "") == nil {
+		return "", fmt.Errorf("version %q cannot be naturally represented in Gentoo", v)
+	}
+	return converted, nil
 }
 
 type suffixKind int
