@@ -102,8 +102,7 @@ func (r rawStmt) String(indent string) string {
 		return ""
 	}
 	var sb strings.Builder
-	lines := strings.Split(r.Content, "\n")
-	for _, line := range lines {
+	for line := range strings.SplitSeq(r.Content, "\n") {
 		if line != "" {
 			sb.WriteString(indent)
 			sb.WriteString(line)
@@ -377,14 +376,9 @@ func NewAndExpr(exprs ...conditionExpr) conditionExpr {
 	// Deduplicate using Equals
 	var unique []conditionExpr
 	for _, e := range flattened {
-		found := false
-		for _, u := range unique {
-			if e.Equals(u) {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.ContainsFunc(unique, func(u conditionExpr) bool {
+			return e.Equals(u)
+		}) {
 			unique = append(unique, e)
 		}
 	}
@@ -425,14 +419,9 @@ func NewOrExpr(exprs ...conditionExpr) conditionExpr {
 	// Deduplicate using Equals
 	var unique []conditionExpr
 	for _, e := range flattened {
-		found := false
-		for _, u := range unique {
-			if e.Equals(u) {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.ContainsFunc(unique, func(u conditionExpr) bool {
+			return e.Equals(u)
+		}) {
 			unique = append(unique, e)
 		}
 	}
@@ -517,7 +506,7 @@ func (p *installPlan) reducePlan() *installPlan {
 		return nil
 	}
 	current := p
-	for iter := 0; iter < 10; iter++ {
+	for range 10 {
 		next := &installPlan{
 			UniverseArchitectures: current.UniverseArchitectures,
 			Body:                  reduceStmts(current.Body, current.UniverseArchitectures, make(map[string]string)),
@@ -727,11 +716,10 @@ func findCommonFactors(slice []conditionStmt) []conditionExpr {
 		cTerms := getTerms(c.Expr)
 		var nextCommon []conditionExpr
 		for _, f := range common {
-			for _, ct := range cTerms {
-				if f.Equals(ct) {
-					nextCommon = append(nextCommon, f)
-					break
-				}
+			if slices.ContainsFunc(cTerms, func(ct conditionExpr) bool {
+				return f.Equals(ct)
+			}) {
+				nextCommon = append(nextCommon, f)
 			}
 		}
 		common = nextCommon
