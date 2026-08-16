@@ -782,8 +782,8 @@ func TestTemplateScenarios(t *testing.T) {
 	tmplStr := ebuildTemplate
 
 	testCases := []struct {
-		name          string
-		doexe         []installItemData
+		name  string
+		doexe []installItemData
 	}{
 		{
 			name: "scenario_1",
@@ -823,13 +823,13 @@ func TestTemplateScenarios(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			data := struct {
-				Description   string
-				Homepage      string
-				License       string
-				Keywords      string
-				Bindir        string
-				ExtraInstall  string
-				Archs         []any
+				Description  string
+				Homepage     string
+				License      string
+				Keywords     string
+				Bindir       string
+				ExtraInstall string
+				Archs        []any
 
 				UseFlags      []config.GentooUseFlag
 				Dodir         []string
@@ -839,45 +839,45 @@ func TestTemplateScenarios(t *testing.T) {
 				Eclasses      []string
 				InstallScript string
 			}{
-
 				InstallScript: func() string {
-				    var stmts []installStmt
-				    for _, e := range tc.doexe {
-				        cmd := e.InstallerCmd
-				        if e.Source != e.Base && e.InstallRenameCmd != "" {
-				            cmd = e.InstallRenameCmd
-				        }
+					var stmts []installStmt
+					for _, e := range tc.doexe {
+						cmd := e.InstallerCmd
+						if e.Source != e.Base && e.InstallRenameCmd != "" {
+							cmd = e.InstallRenameCmd
+						}
 
-				        var body []installStmt
-				        if e.DirSwitchCmd != "" {
-				            body = append(body, stateStmt{Command: e.DirSwitchCmd, Value: e.Dir})
-				        }
-				        target := e.Target
-				        if e.Source != e.Base {
-				            target = e.Base
-				        } else if cmd != "dosym" && e.Target == "" {
-				            target = ""
-				        }
-				        dieMsg := "Failed to install " + e.Source
-				        if cmd == "doexe" && target == "" {
-						dieMsg = "Failed to install binary"
-				        }
-				        if cmd == "newexe" && target != "" {
-						dieMsg = "Failed to install binary"
-				        }
-				        body = append(body, actionStmt{Command: cmd, Source: e.Source, Target: target, Die: dieMsg})
+						var body []installStmt
+						if e.DirSwitchCmd != "" {
+							body = append(body, stateStmt{Command: e.DirSwitchCmd, Value: e.Dir})
+						}
+						target := e.Target
+						if e.Source != e.Base {
+							target = e.Base
+						} else if cmd != "dosym" && e.Target == "" {
+							target = ""
+						}
+						dieMsg := "Failed to install " + e.Source
+						if cmd == "doexe" && target == "" {
+							dieMsg = "Failed to install binary"
+						}
+						if cmd == "newexe" && target != "" {
+							dieMsg = "Failed to install binary"
+						}
+						body = append(body, actionStmt{Command: cmd, Source: e.Source, Target: target, Die: dieMsg})
 
-				        if len(e.Keywords) > 0 {
-				            stmts = append(stmts, conditionStmt{Expr: newArchsAndUseExpr(e.Keywords, nil), Body: body})
-				        } else {
-				            stmts = append(stmts, body...)
-				        }
-				    }
-				    plan := installPlan{Body: stmts}
-				    return formatStmts(plan.Body, "  ")
+						if len(e.Keywords) > 0 {
+							stmts = append(stmts, conditionStmt{Expr: newArchsAndUseExpr(e.Keywords, nil), Body: body})
+						} else {
+							stmts = append(stmts, body...)
+						}
+					}
+					plan := &installPlan{Body: stmts}
+					reduced := plan.reducePlan()
+					return formatStmts(reduced.Body, "  ")
 				}(),
-				Bindir:        "/usr/bin",
-				UseFlags:      gentooUseFlags(config.Gentoo{}),
+				Bindir:   "/usr/bin",
+				UseFlags: gentooUseFlags(config.Gentoo{}),
 			}
 			var buf bytes.Buffer
 			err := template.Must(template.New("ebuild").Funcs(template.FuncMap{
@@ -1697,7 +1697,7 @@ func TestEbuildData(t *testing.T) {
 		data := ebuildData{
 			Description: "foo",
 			License:     "MIT",
-			Plan: &installPlan{Body: []installStmt{actionStmt{Command: "dosym", Source: "foo"}}},
+			Plan:        &installPlan{Body: []installStmt{actionStmt{Command: "dosym", Source: "foo"}}},
 		}
 		require.EqualError(t, data.Validate(), "dosym requires a destination")
 	})
@@ -1706,7 +1706,7 @@ func TestEbuildData(t *testing.T) {
 		data := ebuildData{
 			Description: "foo",
 			License:     "MIT",
-			Plan: &installPlan{Body: []installStmt{actionStmt{Command: "dosym", Source: "foo", Target: "bar"}}},
+			Plan:        &installPlan{Body: []installStmt{actionStmt{Command: "dosym", Source: "foo", Target: "bar"}}},
 		}
 		require.NoError(t, data.Validate())
 	})

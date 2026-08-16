@@ -32,10 +32,4 @@ src_install() {
 {{- if .InstallScript }}
 {{ .InstallScript }}
 {{- end }}
-{{- range .Doman }}
-  doman "{{ . }}"
-{{- end }}
-{{- range .Dodoc }}
-  dodoc "{{ . }}"
-{{- end }}
 }

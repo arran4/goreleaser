@@ -480,7 +480,14 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		}
 	}
 
-	plan := installPlan{
+	for _, man := range data.Doman {
+		stmts = append(stmts, actionStmt{Command: "doman", Source: man})
+	}
+	for _, doc := range data.Dodoc {
+		stmts = append(stmts, actionStmt{Command: "dodoc", Source: doc})
+	}
+
+	plan := &installPlan{
 		UniverseArchitectures: keywordsList,
 		Body:                  stmts,
 	}

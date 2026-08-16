@@ -20,8 +20,6 @@ src_install() {
   doexe "prog2" || die "Failed to install binary"
   if use arm64; then
     doexe "prog1_arm" || die "Failed to install binary"
-  fi
-  if use arm64; then
     doexe "prog3" || die "Failed to install binary"
   fi
 }

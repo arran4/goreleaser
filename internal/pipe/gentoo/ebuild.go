@@ -75,13 +75,7 @@ func (d ebuildData) Validate() error {
 		return errors.New("gentoo license is required and cannot be empty")
 	}
 	if d.Plan != nil {
-		for _, stmt := range d.Plan.Body {
-			if a, ok := stmt.(actionStmt); ok {
-				if a.Command == "dosym" && a.Target == "" {
-					return errors.New("dosym requires a destination")
-				}
-			}
-		}
+		return d.Plan.Validate()
 	}
 	return nil
 }

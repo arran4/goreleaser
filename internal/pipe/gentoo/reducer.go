@@ -2,6 +2,7 @@ package gentoo
 
 import (
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -11,6 +12,7 @@ type installStmt interface {
 	isInstallStmt()
 	String(indent string) string
 	Validate() error
+	Equals(other installStmt) bool
 }
 
 type stateStmt struct {
@@ -19,6 +21,7 @@ type stateStmt struct {
 }
 
 func (s stateStmt) isInstallStmt() {}
+
 func (s stateStmt) String(indent string) string {
 	var sb strings.Builder
 	sb.WriteString(indent)
@@ -32,7 +35,13 @@ func (s stateStmt) String(indent string) string {
 	sb.WriteString("\n")
 	return sb.String()
 }
+
 func (s stateStmt) Validate() error { return nil }
+
+func (s stateStmt) Equals(other installStmt) bool {
+	o, ok := other.(stateStmt)
+	return ok && s.Command == o.Command && s.Value == o.Value
+}
 
 type actionStmt struct {
 	Command string
@@ -42,6 +51,7 @@ type actionStmt struct {
 }
 
 func (a actionStmt) isInstallStmt() {}
+
 func (a actionStmt) String(indent string) string {
 	var sb strings.Builder
 	sb.WriteString(indent)
@@ -76,11 +86,17 @@ func (a actionStmt) Validate() error {
 	return nil
 }
 
+func (a actionStmt) Equals(other installStmt) bool {
+	o, ok := other.(actionStmt)
+	return ok && a.Command == o.Command && a.Source == o.Source && a.Target == o.Target && a.Die == o.Die
+}
+
 type rawStmt struct {
 	Content string
 }
 
 func (r rawStmt) isInstallStmt() {}
+
 func (r rawStmt) String(indent string) string {
 	if r.Content == "" {
 		return ""
@@ -88,21 +104,21 @@ func (r rawStmt) String(indent string) string {
 	var sb strings.Builder
 	lines := strings.Split(r.Content, "\n")
 	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
+		if line != "" {
 			sb.WriteString(indent)
-			// Preserve relative indentation by checking original line
-			// Not perfectly handling tabs vs spaces, but better than full trim
-			// For now, let's just write the trimmed version if no specific relative logic
-			// Actually, "Preserving relative indentation in multi-line ExtraInstall" means we shouldn't trim!
+			sb.WriteString(line)
 		}
-		sb.WriteString(indent)
-		sb.WriteString(line)
 		sb.WriteString("\n")
 	}
 	return sb.String()
 }
+
 func (r rawStmt) Validate() error { return nil }
+
+func (r rawStmt) Equals(other installStmt) bool {
+	o, ok := other.(rawStmt)
+	return ok && r.Content == o.Content
+}
 
 type conditionStmt struct {
 	Expr conditionExpr
@@ -110,11 +126,14 @@ type conditionStmt struct {
 }
 
 func (c conditionStmt) isInstallStmt() {}
+
 func (c conditionStmt) String(indent string) string {
 	var sb strings.Builder
 	sb.WriteString(indent)
 	sb.WriteString("if ")
-	sb.WriteString(c.Expr.String())
+	if c.Expr != nil {
+		sb.WriteString(c.Expr.Shell())
+	}
 	sb.WriteString("; then\n")
 	for _, stmt := range c.Body {
 		sb.WriteString(stmt.String(indent + "  "))
@@ -125,6 +144,9 @@ func (c conditionStmt) String(indent string) string {
 }
 
 func (c conditionStmt) Validate() error {
+	if c.Expr == nil {
+		return errors.New("condition requires an expression")
+	}
 	for _, s := range c.Body {
 		if err := s.Validate(); err != nil {
 			return err
@@ -133,53 +155,146 @@ func (c conditionStmt) Validate() error {
 	return nil
 }
 
-// Expressions for conditions
-type conditionExpr interface {
-	isConditionExpr()
-	String() string
-	Equals(other conditionExpr) bool
-}
-
-type useExpr struct {
-	Flag    string
-	Negated bool
-}
-
-func (u useExpr) isConditionExpr() {}
-func (u useExpr) String() string {
-	if u.Negated {
-		return "! use " + u.Flag
-	}
-	return "use " + u.Flag
-}
-
-func (u useExpr) Equals(other conditionExpr) bool {
-	o, ok := other.(useExpr)
+func (c conditionStmt) Equals(other installStmt) bool {
+	o, ok := other.(conditionStmt)
 	if !ok {
 		return false
 	}
-	return u.Flag == o.Flag && u.Negated == o.Negated
+	if (c.Expr == nil) != (o.Expr == nil) {
+		return false
+	}
+	if c.Expr != nil && !c.Expr.Equals(o.Expr) {
+		return false
+	}
+	if len(c.Body) != len(o.Body) {
+		return false
+	}
+	for i := range c.Body {
+		if !c.Body[i].Equals(o.Body[i]) {
+			return false
+		}
+	}
+	return true
 }
 
-type andExpr struct {
+// conditionExpr represents a boolean condition AST node.
+type conditionExpr interface {
+	isConditionExpr()
+	String() string
+	Shell() string
+	Equals(other conditionExpr) bool
+}
+
+// ArchExpr represents an architecture condition predicate, e.g. Arch(amd64).
+type ArchExpr struct {
+	Arch string
+}
+
+func (a ArchExpr) isConditionExpr() {}
+
+func (a ArchExpr) String() string {
+	return fmt.Sprintf("Arch(%s)", a.Arch)
+}
+
+func (a ArchExpr) Shell() string {
+	return "use " + a.Arch
+}
+
+func (a ArchExpr) Equals(other conditionExpr) bool {
+	o, ok := other.(ArchExpr)
+	return ok && a.Arch == o.Arch
+}
+
+// UseExpr represents a Gentoo USE flag condition predicate, e.g. Use(extended).
+type UseExpr struct {
+	Flag string
+}
+
+func (u UseExpr) isConditionExpr() {}
+
+func (u UseExpr) String() string {
+	return fmt.Sprintf("Use(%s)", u.Flag)
+}
+
+func (u UseExpr) Shell() string {
+	return "use " + u.Flag
+}
+
+func (u UseExpr) Equals(other conditionExpr) bool {
+	o, ok := other.(UseExpr)
+	return ok && u.Flag == o.Flag
+}
+
+// NotExpr represents a boolean NOT operation, e.g. NOT(Use(extended)).
+type NotExpr struct {
+	Expr conditionExpr
+}
+
+func (n NotExpr) isConditionExpr() {}
+
+func (n NotExpr) String() string {
+	if n.Expr == nil {
+		return "NOT()"
+	}
+	return fmt.Sprintf("NOT(%s)", n.Expr.String())
+}
+
+func (n NotExpr) Shell() string {
+	if n.Expr == nil {
+		return ""
+	}
+	switch inner := n.Expr.(type) {
+	case ArchExpr:
+		return "! use " + inner.Arch
+	case UseExpr:
+		return "! use " + inner.Flag
+	case NotExpr:
+		return inner.Expr.Shell()
+	default:
+		return "! " + n.Expr.Shell()
+	}
+}
+
+func (n NotExpr) Equals(other conditionExpr) bool {
+	o, ok := other.(NotExpr)
+	if !ok {
+		return false
+	}
+	if (n.Expr == nil) != (o.Expr == nil) {
+		return false
+	}
+	if n.Expr != nil && !n.Expr.Equals(o.Expr) {
+		return false
+	}
+	return true
+}
+
+// AndExpr represents a boolean AND operation, e.g. AND(Arch(amd64), Use(extended)).
+type AndExpr struct {
 	Exprs []conditionExpr
 }
 
-func (a andExpr) isConditionExpr() {}
-func (a andExpr) String() string {
+func (a AndExpr) isConditionExpr() {}
+
+func (a AndExpr) String() string {
 	var parts []string
 	for _, expr := range a.Exprs {
 		parts = append(parts, expr.String())
 	}
+	return fmt.Sprintf("AND(%s)", strings.Join(parts, ", "))
+}
+
+func (a AndExpr) Shell() string {
+	var parts []string
+	for _, expr := range a.Exprs {
+		parts = append(parts, expr.Shell())
+	}
 	return strings.Join(parts, " && ")
 }
 
-func (a andExpr) Equals(other conditionExpr) bool {
-	o, ok := other.(andExpr)
-	if !ok {
-		return false
-	}
-	if len(a.Exprs) != len(o.Exprs) {
+func (a AndExpr) Equals(other conditionExpr) bool {
+	o, ok := other.(AndExpr)
+	if !ok || len(a.Exprs) != len(o.Exprs) {
 		return false
 	}
 	for i, e := range a.Exprs {
@@ -190,25 +305,32 @@ func (a andExpr) Equals(other conditionExpr) bool {
 	return true
 }
 
-type orExpr struct {
+// OrExpr represents a boolean OR operation, e.g. OR(Arch(amd64), Arch(arm64)).
+type OrExpr struct {
 	Exprs []conditionExpr
 }
 
-func (o orExpr) isConditionExpr() {}
-func (o orExpr) String() string {
+func (o OrExpr) isConditionExpr() {}
+
+func (o OrExpr) String() string {
 	var parts []string
 	for _, expr := range o.Exprs {
 		parts = append(parts, expr.String())
 	}
+	return fmt.Sprintf("OR(%s)", strings.Join(parts, ", "))
+}
+
+func (o OrExpr) Shell() string {
+	var parts []string
+	for _, expr := range o.Exprs {
+		parts = append(parts, expr.Shell())
+	}
 	return strings.Join(parts, " || ")
 }
 
-func (o orExpr) Equals(other conditionExpr) bool {
-	otherOr, ok := other.(orExpr)
-	if !ok {
-		return false
-	}
-	if len(o.Exprs) != len(otherOr.Exprs) {
+func (o OrExpr) Equals(other conditionExpr) bool {
+	otherOr, ok := other.(OrExpr)
+	if !ok || len(o.Exprs) != len(otherOr.Exprs) {
 		return false
 	}
 	for i, e := range o.Exprs {
@@ -219,26 +341,133 @@ func (o orExpr) Equals(other conditionExpr) bool {
 	return true
 }
 
+// NewNotExpr creates a normalized NOT expression.
+func NewNotExpr(expr conditionExpr) conditionExpr {
+	if expr == nil {
+		return nil
+	}
+	if n, ok := expr.(NotExpr); ok {
+		return n.Expr // NOT(NOT(x)) -> x
+	}
+	return NotExpr{Expr: expr}
+}
+
+// NewAndExpr creates a canonicalized, flattened, deduplicated AND expression.
+func NewAndExpr(exprs ...conditionExpr) conditionExpr {
+	var flattened []conditionExpr
+	for _, e := range exprs {
+		if e == nil {
+			continue
+		}
+		if a, ok := e.(AndExpr); ok {
+			for _, sub := range a.Exprs {
+				if sub != nil {
+					flattened = append(flattened, sub)
+				}
+			}
+		} else {
+			flattened = append(flattened, e)
+		}
+	}
+
+	if len(flattened) == 0 {
+		return nil
+	}
+
+	// Deduplicate using Equals
+	var unique []conditionExpr
+	for _, e := range flattened {
+		found := false
+		for _, u := range unique {
+			if e.Equals(u) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			unique = append(unique, e)
+		}
+	}
+
+	// Canonical sort
+	slices.SortFunc(unique, func(a, b conditionExpr) int {
+		return strings.Compare(a.String(), b.String())
+	})
+
+	if len(unique) == 1 {
+		return unique[0]
+	}
+	return AndExpr{Exprs: unique}
+}
+
+// NewOrExpr creates a canonicalized, flattened, deduplicated OR expression.
+func NewOrExpr(exprs ...conditionExpr) conditionExpr {
+	var flattened []conditionExpr
+	for _, e := range exprs {
+		if e == nil {
+			continue
+		}
+		if o, ok := e.(OrExpr); ok {
+			for _, sub := range o.Exprs {
+				if sub != nil {
+					flattened = append(flattened, sub)
+				}
+			}
+		} else {
+			flattened = append(flattened, e)
+		}
+	}
+
+	if len(flattened) == 0 {
+		return nil
+	}
+
+	// Deduplicate using Equals
+	var unique []conditionExpr
+	for _, e := range flattened {
+		found := false
+		for _, u := range unique {
+			if e.Equals(u) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			unique = append(unique, e)
+		}
+	}
+
+	// Canonical sort
+	slices.SortFunc(unique, func(a, b conditionExpr) int {
+		return strings.Compare(a.String(), b.String())
+	})
+
+	if len(unique) == 1 {
+		return unique[0]
+	}
+	return OrExpr{Exprs: unique}
+}
+
 func newArchsAndUseExpr(archs []string, uses []string) conditionExpr {
 	var terms []conditionExpr
 
 	if len(archs) > 0 {
 		var archTerms []conditionExpr
 		for _, arch := range archs {
-			archTerms = append(archTerms, useExpr{Flag: arch})
+			archTerms = append(archTerms, ArchExpr{Arch: arch})
 		}
 		if len(archTerms) == 1 {
 			terms = append(terms, archTerms[0])
 		} else {
-			terms = append(terms, orExpr{Exprs: archTerms})
+			terms = append(terms, NewOrExpr(archTerms...))
 		}
 	}
 
 	for _, use := range uses {
 		if rest, ok := strings.CutPrefix(use, "!"); ok {
-			terms = append(terms, useExpr{Flag: rest, Negated: true})
+			terms = append(terms, NewNotExpr(UseExpr{Flag: rest}))
 		} else {
-			terms = append(terms, useExpr{Flag: use})
+			terms = append(terms, UseExpr{Flag: use})
 		}
 	}
 
@@ -248,17 +477,23 @@ func newArchsAndUseExpr(archs []string, uses []string) conditionExpr {
 	if len(terms) == 1 {
 		return terms[0]
 	}
-	return andExpr{Exprs: terms}
+	return NewAndExpr(terms...)
 }
 
 func isUniversalArchExpr(expr conditionExpr, universe []string) bool {
-	if o, ok := expr.(orExpr); ok {
+	if len(universe) == 0 || expr == nil {
+		return false
+	}
+	switch e := expr.(type) {
+	case ArchExpr:
+		return len(universe) == 1 && universe[0] == e.Arch
+	case OrExpr:
 		var archs []string
-		for _, e := range o.Exprs {
-			if u, ok := e.(useExpr); ok && !u.Negated {
-				archs = append(archs, u.Flag)
+		for _, term := range e.Exprs {
+			if arch, ok := term.(ArchExpr); ok {
+				archs = append(archs, arch.Arch)
 			} else {
-				return false // Has non-arch or negated term in OR
+				return false
 			}
 		}
 		for _, u := range universe {
@@ -267,11 +502,9 @@ func isUniversalArchExpr(expr conditionExpr, universe []string) bool {
 			}
 		}
 		return true
-	} else if u, ok := expr.(useExpr); ok && !u.Negated {
-		// Single arch
-		return len(universe) == 1 && universe[0] == u.Flag
+	default:
+		return false
 	}
-	return false
 }
 
 type installPlan struct {
@@ -283,11 +516,18 @@ func (p *installPlan) reducePlan() *installPlan {
 	if p == nil {
 		return nil
 	}
-	reducedBody := reduceStmts(p.Body, p.UniverseArchitectures, make(map[string]string))
-	return &installPlan{
-		UniverseArchitectures: p.UniverseArchitectures,
-		Body:                  reducedBody,
+	current := p
+	for iter := 0; iter < 10; iter++ {
+		next := &installPlan{
+			UniverseArchitectures: current.UniverseArchitectures,
+			Body:                  reduceStmts(current.Body, current.UniverseArchitectures, make(map[string]string)),
+		}
+		if planEqual(current, next) {
+			return next
+		}
+		current = next
 	}
+	return current
 }
 
 func (p *installPlan) Validate() error {
@@ -300,6 +540,27 @@ func (p *installPlan) Validate() error {
 		}
 	}
 	return nil
+}
+
+func planEqual(a, b *installPlan) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if !slices.Equal(a.UniverseArchitectures, b.UniverseArchitectures) {
+		return false
+	}
+	if len(a.Body) != len(b.Body) {
+		return false
+	}
+	for i := range a.Body {
+		if !a.Body[i].Equals(b.Body[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func reduceStmts(stmts []installStmt, universe []string, state map[string]string) []installStmt {
@@ -315,7 +576,7 @@ func reduceStmts(stmts []installStmt, universe []string, state map[string]string
 				continue
 			}
 
-			// Rule 3: Propagate state
+			// Rule 3: Propagate state into branch
 			stateBefore := make(map[string]string)
 			maps.Copy(stateBefore, state)
 
@@ -330,16 +591,23 @@ func reduceStmts(stmts []installStmt, universe []string, state map[string]string
 			s.Body = reducedBody
 			reduced = append(reduced, s)
 
-			// Join state
+			// Join state: any key mutated in branch is now uncertain (divergent)
 			for k := range state {
 				if branchState[k] != stateBefore[k] {
-					delete(state, k) // divergent
+					delete(state, k)
+				}
+			}
+			for k, v := range branchState {
+				if _, exists := stateBefore[k]; !exists {
+					delete(state, k)
+				} else if stateBefore[k] != v {
+					delete(state, k)
 				}
 			}
 
 		case stateStmt:
 			// Rule 2: Redundant state setters
-			if state[s.Command] == s.Value {
+			if val, ok := state[s.Command]; ok && val == s.Value {
 				continue // redundant
 			}
 			state[s.Command] = s.Value
@@ -350,75 +618,181 @@ func reduceStmts(stmts []installStmt, universe []string, state map[string]string
 		}
 	}
 
-	// Merge adjacent identical conditions (Rule 5 simple case)
-	// And factoring: if sibling conditions have a common architectural OR, we can nest them
-	reduced = mergeAndFactorConditions(reduced)
+	// Merge and factor sibling conditions
+	reduced = mergeAndFactorSiblingConditions(reduced)
 
 	return reduced
 }
 
-func mergeAndFactorConditions(stmts []installStmt) []installStmt {
-	var merged []installStmt
-	for i := 0; i < len(stmts); i++ {
-		s1 := stmts[i]
-		if c1, ok := s1.(conditionStmt); ok {
-			for j := i + 1; j < len(stmts); j++ {
-				if c2, ok := stmts[j].(conditionStmt); ok && c1.Expr.Equals(c2.Expr) {
-					c1.Body = append(c1.Body, c2.Body...)
-					stmts[i] = c1
-					stmts[j] = rawStmt{Content: ""} // Mark for deletion
-				} else if c2, ok := stmts[j].(conditionStmt); ok {
-					// Try factoring common arch expr
-					c1Arch, _ := splitArchUseExpr(c1.Expr)
-					c2Arch, _ := splitArchUseExpr(c2.Expr)
-					if c1Arch != nil && c2Arch != nil && c1Arch.Equals(c2Arch) {
-						// We can factor out the architecture!
-						// Wait, for this to work we need to replace c1 with a new conditionStmt
-						// containing nested conditionStmts for c1Use and c2Use
-						// Let's keep it simple for now and do it dynamically below if needed.
-						break // Only merge contiguous identical for now
-					} else {
-						break // Can only merge contiguous
-					}
-				} else {
-					break // Can only merge contiguous
-				}
-			}
-			merged = append(merged, stmts[i])
-		} else {
-			if r, ok := s1.(rawStmt); ok && r.Content == "" {
+func mergeAndFactorSiblingConditions(stmts []installStmt) []installStmt {
+	var result []installStmt
+	i := 0
+	for i < len(stmts) {
+		_, isCond := stmts[i].(conditionStmt)
+		if !isCond {
+			if raw, isRaw := stmts[i].(rawStmt); isRaw && raw.Content == "" {
+				i++
 				continue
 			}
-			merged = append(merged, s1)
+			result = append(result, stmts[i])
+			i++
+			continue
 		}
+
+		// Collect contiguous conditionStmts
+		var conds []conditionStmt
+		j := i
+		for j < len(stmts) {
+			c, ok := stmts[j].(conditionStmt)
+			if !ok {
+				break
+			}
+			conds = append(conds, c)
+			j++
+		}
+
+		factored := factorConditionsSlice(conds)
+		result = append(result, factored...)
+		i = j
 	}
-	return merged
+	return result
 }
 
-func splitArchUseExpr(expr conditionExpr) (conditionExpr, conditionExpr) {
-	if and, ok := expr.(andExpr); ok {
-		if len(and.Exprs) > 0 {
-			// Assume first term is architecture OR/Single USE
-			if _, isOr := and.Exprs[0].(orExpr); isOr {
-				if len(and.Exprs) == 2 {
-					return and.Exprs[0], and.Exprs[1]
-				}
-				return and.Exprs[0], andExpr{Exprs: and.Exprs[1:]}
-			} else if u, isUse := and.Exprs[0].(useExpr); isUse && !u.Negated {
-				// If it's a positive USE flag, it COULD be an arch. We can't strictly know without the universe,
-				// but let's assume if it's the first term in an AND, it might be the arch.
-				if len(and.Exprs) == 2 {
-					return and.Exprs[0], and.Exprs[1]
-				}
-				return and.Exprs[0], andExpr{Exprs: and.Exprs[1:]}
+func factorConditionsSlice(conds []conditionStmt) []installStmt {
+	if len(conds) == 0 {
+		return nil
+	}
+	if len(conds) == 1 {
+		return []installStmt{conds[0]}
+	}
+
+	var result []installStmt
+	i := 0
+	for i < len(conds) {
+		bestJ := i
+		var bestFactor conditionExpr
+
+		for j := len(conds) - 1; j > i; j-- {
+			factors := findCommonFactors(conds[i : j+1])
+			if len(factors) > 0 {
+				bestJ = j
+				bestFactor = selectBestFactor(factors)
+				break
 			}
 		}
-	} else if or, ok := expr.(orExpr); ok {
-		return or, nil
-	} else if use, ok := expr.(useExpr); ok && !use.Negated {
-		return use, nil
+
+		if bestJ > i && bestFactor != nil {
+			var innerBody []installStmt
+			for k := i; k <= bestJ; k++ {
+				rem := removeTerm(conds[k].Expr, bestFactor)
+				if rem == nil {
+					innerBody = append(innerBody, conds[k].Body...)
+				} else {
+					innerBody = append(innerBody, conditionStmt{
+						Expr: rem,
+						Body: conds[k].Body,
+					})
+				}
+			}
+			factoredCond := conditionStmt{
+				Expr: bestFactor,
+				Body: mergeAndFactorSiblingConditions(innerBody),
+			}
+			result = append(result, factoredCond)
+			i = bestJ + 1
+		} else {
+			result = append(result, conds[i])
+			i++
+		}
 	}
-	return nil, nil
+	return result
+}
+
+func getTerms(expr conditionExpr) []conditionExpr {
+	if expr == nil {
+		return nil
+	}
+	if and, ok := expr.(AndExpr); ok {
+		return and.Exprs
+	}
+	return []conditionExpr{expr}
+}
+
+func findCommonFactors(slice []conditionStmt) []conditionExpr {
+	if len(slice) == 0 {
+		return nil
+	}
+	common := getTerms(slice[0].Expr)
+	for _, c := range slice[1:] {
+		cTerms := getTerms(c.Expr)
+		var nextCommon []conditionExpr
+		for _, f := range common {
+			for _, ct := range cTerms {
+				if f.Equals(ct) {
+					nextCommon = append(nextCommon, f)
+					break
+				}
+			}
+		}
+		common = nextCommon
+		if len(common) == 0 {
+			break
+		}
+	}
+	return common
+}
+
+func selectBestFactor(factors []conditionExpr) conditionExpr {
+	if len(factors) == 0 {
+		return nil
+	}
+	slices.SortFunc(factors, func(a, b conditionExpr) int {
+		pA := factorPriority(a)
+		pB := factorPriority(b)
+		if pA != pB {
+			return pA - pB
+		}
+		return strings.Compare(a.String(), b.String())
+	})
+	return factors[0]
+}
+
+func factorPriority(e conditionExpr) int {
+	switch e.(type) {
+	case ArchExpr, OrExpr:
+		return 1
+	case UseExpr:
+		return 2
+	case NotExpr:
+		return 3
+	default:
+		return 4
+	}
+}
+
+func removeTerm(expr conditionExpr, term conditionExpr) conditionExpr {
+	if expr == nil || term == nil {
+		return expr
+	}
+	if expr.Equals(term) {
+		return nil
+	}
+	if and, ok := expr.(AndExpr); ok {
+		var remaining []conditionExpr
+		for _, t := range and.Exprs {
+			if !t.Equals(term) {
+				remaining = append(remaining, t)
+			}
+		}
+		if len(remaining) == 0 {
+			return nil
+		}
+		if len(remaining) == 1 {
+			return remaining[0]
+		}
+		return NewAndExpr(remaining...)
+	}
+	return expr
 }
 
 func formatStmts(stmts []installStmt, indent string) string {
