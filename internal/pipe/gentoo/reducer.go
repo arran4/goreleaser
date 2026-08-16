@@ -8,6 +8,173 @@ import (
 	"strings"
 )
 
+type StateFamily string
+
+const (
+	StateFamilyNone StateFamily = ""
+	StateFamilyExe  StateFamily = "exeinto"
+	StateFamilyIns  StateFamily = "insinto"
+	StateFamilyBin  StateFamily = "into"
+	StateFamilyDoc  StateFamily = "docinto"
+)
+
+type InstallOp string
+
+const (
+	OpDoexe          InstallOp = "doexe"
+	OpNewexe         InstallOp = "newexe"
+	OpDoins          InstallOp = "doins"
+	OpNewins         InstallOp = "newins"
+	OpDobin          InstallOp = "dobin"
+	OpNewbin         InstallOp = "newbin"
+	OpDosbin         InstallOp = "dosbin"
+	OpNewsbin        InstallOp = "newsbin"
+	OpDoconfd        InstallOp = "doconfd"
+	OpNewconfd       InstallOp = "newconfd"
+	OpDoenvd         InstallOp = "doenvd"
+	OpNewenvd        InstallOp = "newenvd"
+	OpDoheader       InstallOp = "doheader"
+	OpNewheader      InstallOp = "newheader"
+	OpDoinitd        InstallOp = "doinitd"
+	OpNewinitd       InstallOp = "newinitd"
+	OpSystemdDounit  InstallOp = "systemd_dounit"
+	OpSystemdNewunit InstallOp = "systemd_newunit"
+	OpDosym          InstallOp = "dosym"
+	OpDodoc          InstallOp = "dodoc"
+	OpNewdoc         InstallOp = "newdoc"
+	OpDoman          InstallOp = "doman"
+	OpNewman         InstallOp = "newman"
+	OpDodir          InstallOp = "dodir"
+)
+
+type OpDescriptor struct {
+	Command      string
+	IsRename     bool
+	StateFamily  StateFamily
+	TakesTwoArgs bool
+}
+
+func (op InstallOp) Descriptor() OpDescriptor {
+	switch op {
+	case OpDoexe:
+		return OpDescriptor{Command: "doexe", IsRename: false, StateFamily: StateFamilyExe}
+	case OpNewexe:
+		return OpDescriptor{Command: "newexe", IsRename: true, StateFamily: StateFamilyExe, TakesTwoArgs: true}
+	case OpDoins:
+		return OpDescriptor{Command: "doins", IsRename: false, StateFamily: StateFamilyIns}
+	case OpNewins:
+		return OpDescriptor{Command: "newins", IsRename: true, StateFamily: StateFamilyIns, TakesTwoArgs: true}
+	case OpDobin:
+		return OpDescriptor{Command: "dobin", IsRename: false, StateFamily: StateFamilyBin}
+	case OpNewbin:
+		return OpDescriptor{Command: "newbin", IsRename: true, StateFamily: StateFamilyBin, TakesTwoArgs: true}
+	case OpDosbin:
+		return OpDescriptor{Command: "dosbin", IsRename: false, StateFamily: StateFamilyBin}
+	case OpNewsbin:
+		return OpDescriptor{Command: "newsbin", IsRename: true, StateFamily: StateFamilyBin, TakesTwoArgs: true}
+	case OpDoconfd:
+		return OpDescriptor{Command: "doconfd", IsRename: false, StateFamily: StateFamilyNone}
+	case OpNewconfd:
+		return OpDescriptor{Command: "newconfd", IsRename: true, StateFamily: StateFamilyNone, TakesTwoArgs: true}
+	case OpDoenvd:
+		return OpDescriptor{Command: "doenvd", IsRename: false, StateFamily: StateFamilyNone}
+	case OpNewenvd:
+		return OpDescriptor{Command: "newenvd", IsRename: true, StateFamily: StateFamilyNone, TakesTwoArgs: true}
+	case OpDoheader:
+		return OpDescriptor{Command: "doheader", IsRename: false, StateFamily: StateFamilyNone}
+	case OpNewheader:
+		return OpDescriptor{Command: "newheader", IsRename: true, StateFamily: StateFamilyNone, TakesTwoArgs: true}
+	case OpDoinitd:
+		return OpDescriptor{Command: "doinitd", IsRename: false, StateFamily: StateFamilyNone}
+	case OpNewinitd:
+		return OpDescriptor{Command: "newinitd", IsRename: true, StateFamily: StateFamilyNone, TakesTwoArgs: true}
+	case OpSystemdDounit:
+		return OpDescriptor{Command: "systemd_dounit", IsRename: false, StateFamily: StateFamilyNone}
+	case OpSystemdNewunit:
+		return OpDescriptor{Command: "systemd_newunit", IsRename: true, StateFamily: StateFamilyNone, TakesTwoArgs: true}
+	case OpDosym:
+		return OpDescriptor{Command: "dosym", IsRename: false, StateFamily: StateFamilyNone, TakesTwoArgs: true}
+	case OpDodoc:
+		return OpDescriptor{Command: "dodoc", IsRename: false, StateFamily: StateFamilyDoc}
+	case OpNewdoc:
+		return OpDescriptor{Command: "newdoc", IsRename: true, StateFamily: StateFamilyDoc, TakesTwoArgs: true}
+	case OpDoman:
+		return OpDescriptor{Command: "doman", IsRename: false, StateFamily: StateFamilyNone}
+	case OpNewman:
+		return OpDescriptor{Command: "newman", IsRename: true, StateFamily: StateFamilyNone, TakesTwoArgs: true}
+	case OpDodir:
+		return OpDescriptor{Command: "dodir", IsRename: false, StateFamily: StateFamilyNone}
+	default:
+		return OpDescriptor{Command: string(op), IsRename: false, StateFamily: StateFamilyNone}
+	}
+}
+
+func resolveInstallOp(section string, isRename bool) InstallOp {
+	switch section {
+	case "doexe":
+		if isRename {
+			return OpNewexe
+		}
+		return OpDoexe
+	case "doins":
+		if isRename {
+			return OpNewins
+		}
+		return OpDoins
+	case "dobin":
+		if isRename {
+			return OpNewbin
+		}
+		return OpDobin
+	case "dosbin":
+		if isRename {
+			return OpNewsbin
+		}
+		return OpDosbin
+	case "doconfd":
+		if isRename {
+			return OpNewconfd
+		}
+		return OpDoconfd
+	case "doenvd":
+		if isRename {
+			return OpNewenvd
+		}
+		return OpDoenvd
+	case "doheader":
+		if isRename {
+			return OpNewheader
+		}
+		return OpDoheader
+	case "doinitd":
+		if isRename {
+			return OpNewinitd
+		}
+		return OpDoinitd
+	case "systemd":
+		if isRename {
+			return OpSystemdNewunit
+		}
+		return OpSystemdDounit
+	case "dosym":
+		return OpDosym
+	case "dodoc":
+		if isRename {
+			return OpNewdoc
+		}
+		return OpDodoc
+	case "doman":
+		if isRename {
+			return OpNewman
+		}
+		return OpDoman
+	case "dodir":
+		return OpDodir
+	default:
+		return InstallOp(section)
+	}
+}
+
 type installStmt interface {
 	isInstallStmt()
 	String(indent string) string
@@ -16,8 +183,8 @@ type installStmt interface {
 }
 
 type stateStmt struct {
-	Command string
-	Value   string
+	Family StateFamily
+	Value  string
 }
 
 func (s stateStmt) isInstallStmt() {}
@@ -25,7 +192,7 @@ func (s stateStmt) isInstallStmt() {}
 func (s stateStmt) String(indent string) string {
 	var sb strings.Builder
 	sb.WriteString(indent)
-	sb.WriteString(s.Command)
+	sb.WriteString(string(s.Family))
 	if s.Value != "" && s.Value != "/" {
 		sb.WriteString(" ")
 		sb.WriteString(s.Value)
@@ -36,35 +203,37 @@ func (s stateStmt) String(indent string) string {
 	return sb.String()
 }
 
-func (s stateStmt) Validate() error { return nil }
+func (s stateStmt) Validate() error {
+	if s.Family == "" {
+		return errors.New("stateStmt requires a state family")
+	}
+	return nil
+}
 
 func (s stateStmt) Equals(other installStmt) bool {
 	o, ok := other.(stateStmt)
-	return ok && s.Command == o.Command && s.Value == o.Value
+	return ok && s.Family == o.Family && s.Value == o.Value
 }
 
 type actionStmt struct {
-	Command string
-	Source  string
-	Target  string
-	Die     string
+	Op     InstallOp
+	Source string
+	Target string
+	Die    string
 }
 
 func (a actionStmt) isInstallStmt() {}
 
 func (a actionStmt) String(indent string) string {
+	desc := a.Op.Descriptor()
 	var sb strings.Builder
 	sb.WriteString(indent)
-	sb.WriteString(a.Command)
+	sb.WriteString(desc.Command)
 	sb.WriteString(" \"")
 	sb.WriteString(a.Source)
 	sb.WriteString("\"")
 
-	if a.Target != "" && a.Target != a.Source && strings.HasPrefix(a.Command, "new") {
-		sb.WriteString(" \"")
-		sb.WriteString(a.Target)
-		sb.WriteString("\"")
-	} else if a.Command == "dosym" {
+	if desc.TakesTwoArgs && a.Target != "" {
 		sb.WriteString(" \"")
 		sb.WriteString(a.Target)
 		sb.WriteString("\"")
@@ -80,15 +249,18 @@ func (a actionStmt) String(indent string) string {
 }
 
 func (a actionStmt) Validate() error {
-	if a.Command == "dosym" && a.Target == "" {
+	if a.Op == OpDosym && a.Target == "" {
 		return errors.New("dosym requires a destination")
+	}
+	if a.Op.Descriptor().IsRename && a.Target == "" {
+		return fmt.Errorf("%s requires a destination", a.Op)
 	}
 	return nil
 }
 
 func (a actionStmt) Equals(other installStmt) bool {
 	o, ok := other.(actionStmt)
-	return ok && a.Command == o.Command && a.Source == o.Source && a.Target == o.Target && a.Die == o.Die
+	return ok && a.Op == o.Op && a.Source == o.Source && a.Target == o.Target && a.Die == o.Die
 }
 
 type rawStmt struct {
@@ -250,7 +422,7 @@ func (n NotExpr) Shell() string {
 	case NotExpr:
 		return inner.Expr.Shell()
 	default:
-		return "! " + n.Expr.Shell()
+		return "! { " + n.Expr.Shell() + "; }"
 	}
 }
 
@@ -286,7 +458,11 @@ func (a AndExpr) String() string {
 func (a AndExpr) Shell() string {
 	var parts []string
 	for _, expr := range a.Exprs {
-		parts = append(parts, expr.Shell())
+		if _, isOr := expr.(OrExpr); isOr {
+			parts = append(parts, "{ "+expr.Shell()+"; }")
+		} else {
+			parts = append(parts, expr.Shell())
+		}
 	}
 	return strings.Join(parts, " && ")
 }
@@ -322,7 +498,11 @@ func (o OrExpr) String() string {
 func (o OrExpr) Shell() string {
 	var parts []string
 	for _, expr := range o.Exprs {
-		parts = append(parts, expr.Shell())
+		if _, isAnd := expr.(AndExpr); isAnd {
+			parts = append(parts, "{ "+expr.Shell()+"; }")
+		} else {
+			parts = append(parts, expr.Shell())
+		}
 	}
 	return strings.Join(parts, " || ")
 }
@@ -496,9 +676,95 @@ func isUniversalArchExpr(expr conditionExpr, universe []string) bool {
 	}
 }
 
+// simplifyExpr recursively simplifies universal architecture predicates anywhere in an expression tree.
+func simplifyExpr(expr conditionExpr, universe []string) conditionExpr {
+	if expr == nil || len(universe) == 0 {
+		return expr
+	}
+	if isUniversalArchExpr(expr, universe) {
+		return nil
+	}
+	switch e := expr.(type) {
+	case ArchExpr:
+		if len(universe) == 1 && universe[0] == e.Arch {
+			return nil
+		}
+		return e
+	case NotExpr:
+		simplified := simplifyExpr(e.Expr, universe)
+		if simplified == nil {
+			return nil
+		}
+		return NewNotExpr(simplified)
+	case AndExpr:
+		var terms []conditionExpr
+		for _, sub := range e.Exprs {
+			s := simplifyExpr(sub, universe)
+			if s != nil {
+				terms = append(terms, s)
+			}
+		}
+		if len(terms) == 0 {
+			return nil
+		}
+		if len(terms) == 1 {
+			return terms[0]
+		}
+		return NewAndExpr(terms...)
+	case OrExpr:
+		// Check if the arch terms in OrExpr cover the universe
+		var archs []string
+		for _, sub := range e.Exprs {
+			if arch, ok := sub.(ArchExpr); ok {
+				archs = append(archs, arch.Arch)
+			}
+		}
+		if len(archs) > 0 && len(universe) > 0 {
+			coversAll := true
+			for _, u := range universe {
+				if !slices.Contains(archs, u) {
+					coversAll = false
+					break
+				}
+			}
+			if coversAll {
+				return nil
+			}
+		}
+
+		var terms []conditionExpr
+		for _, sub := range e.Exprs {
+			if isUniversalArchExpr(sub, universe) {
+				return nil
+			}
+			s := simplifyExpr(sub, universe)
+			if s == nil {
+				return nil
+			}
+			terms = append(terms, s)
+		}
+		if len(terms) == 0 {
+			return nil
+		}
+		if len(terms) == 1 {
+			return terms[0]
+		}
+		return NewOrExpr(terms...)
+	default:
+		return expr
+	}
+}
+
 type installPlan struct {
 	UniverseArchitectures []string
 	Body                  []installStmt
+}
+
+func (p *installPlan) String(indent string) string {
+	if p == nil {
+		return ""
+	}
+	return formatStmts(p.Body, indent)
 }
 
 func (p *installPlan) reducePlan() *installPlan {
@@ -506,10 +772,17 @@ func (p *installPlan) reducePlan() *installPlan {
 		return nil
 	}
 	current := p
-	for range 10 {
+	const maxIterations = 100
+	for range maxIterations {
+		initialState := map[StateFamily]string{
+			StateFamilyExe: "",
+			StateFamilyIns: "",
+			StateFamilyBin: "",
+			StateFamilyDoc: "",
+		}
 		next := &installPlan{
 			UniverseArchitectures: current.UniverseArchitectures,
-			Body:                  reduceStmts(current.Body, current.UniverseArchitectures, make(map[string]string)),
+			Body:                  reduceStmts(current.Body, current.UniverseArchitectures, initialState),
 		}
 		if planEqual(current, next) {
 			return next
@@ -552,24 +825,24 @@ func planEqual(a, b *installPlan) bool {
 	return true
 }
 
-func reduceStmts(stmts []installStmt, universe []string, state map[string]string) []installStmt {
+func reduceStmts(stmts []installStmt, universe []string, state map[StateFamily]string) []installStmt {
 	var reduced []installStmt
 
 	for _, stmt := range stmts {
 		switch s := stmt.(type) {
 		case conditionStmt:
-			// Rule 1: Universal architecture conditions
-			if isUniversalArchExpr(s.Expr, universe) {
+			simplifiedExpr := simplifyExpr(s.Expr, universe)
+			if simplifiedExpr == nil {
 				sBody := reduceStmts(s.Body, universe, state)
 				reduced = append(reduced, sBody...)
 				continue
 			}
+			s.Expr = simplifiedExpr
 
-			// Rule 3: Propagate state into branch
-			stateBefore := make(map[string]string)
+			stateBefore := make(map[StateFamily]string)
 			maps.Copy(stateBefore, state)
 
-			branchState := make(map[string]string)
+			branchState := make(map[StateFamily]string)
 			maps.Copy(branchState, stateBefore)
 
 			reducedBody := reduceStmts(s.Body, universe, branchState)
@@ -595,11 +868,10 @@ func reduceStmts(stmts []installStmt, universe []string, state map[string]string
 			}
 
 		case stateStmt:
-			// Rule 2: Redundant state setters
-			if val, ok := state[s.Command]; ok && val == s.Value {
+			if val, ok := state[s.Family]; ok && val == s.Value {
 				continue // redundant
 			}
-			state[s.Command] = s.Value
+			state[s.Family] = s.Value
 			reduced = append(reduced, s)
 
 		default:

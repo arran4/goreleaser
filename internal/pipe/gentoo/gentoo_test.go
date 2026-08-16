@@ -1,14 +1,12 @@
 package gentoo
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
-	"text/template"
 
 	"github.com/goreleaser/goreleaser/v2/internal/artifact"
 	"github.com/goreleaser/goreleaser/v2/internal/client"
@@ -779,129 +777,57 @@ func TestDoRunDifferentBinaries(t *testing.T) {
 }
 
 func TestTemplateScenarios(t *testing.T) {
-	tmplStr := ebuildTemplate
-
 	testCases := []struct {
-		name  string
-		doexe []installItemData
+		name       string
+		bindir     string
+		installers []installItemData
 	}{
 		{
 			name: "scenario_1",
-			doexe: []installItemData{
-				{Source: "prog1", Target: "prog1", Keywords: []string{"amd64", "arm64"}, InstallerCmd: "doexe"},
-				{Source: "prog2", Target: "prog2", Keywords: []string{"amd64", "arm64"}, InstallerCmd: "doexe"},
+			installers: []installItemData{
+				{Section: "doexe", StateFamily: StateFamilyExe, Source: "prog1", Base: "prog1", Keywords: []string{"amd64", "arm64"}},
+				{Section: "doexe", StateFamily: StateFamilyExe, Source: "prog2", Base: "prog2", Keywords: []string{"amd64", "arm64"}},
 			},
 		},
 		{
 			name: "scenario_2",
-			doexe: []installItemData{
-				{Source: "prog1_x86", Target: "prog1", Keywords: []string{"amd64"}, InstallerCmd: "doexe"},
-				{Source: "prog2_x86", Target: "prog2", Keywords: []string{"amd64"}, InstallerCmd: "doexe"},
-				{Source: "prog1_arm", Target: "prog1", Keywords: []string{"arm64"}, InstallerCmd: "doexe"},
-				{Source: "prog2_arm", Target: "prog2", Keywords: []string{"arm64"}, InstallerCmd: "doexe"},
+			installers: []installItemData{
+				{Section: "doexe", StateFamily: StateFamilyExe, Source: "prog1_x86", Target: "prog1", Base: "prog1", Keywords: []string{"amd64"}},
+				{Section: "doexe", StateFamily: StateFamilyExe, Source: "prog2_x86", Target: "prog2", Base: "prog2", Keywords: []string{"amd64"}},
+				{Section: "doexe", StateFamily: StateFamilyExe, Source: "prog1_arm", Target: "prog1", Base: "prog1", Keywords: []string{"arm64"}},
+				{Section: "doexe", StateFamily: StateFamilyExe, Source: "prog2_arm", Target: "prog2", Base: "prog2", Keywords: []string{"arm64"}},
 			},
 		},
 		{
 			name: "scenario_3",
-			doexe: []installItemData{
-				{Source: "prog1_x86", Target: "prog1", Keywords: []string{"amd64"}, InstallerCmd: "doexe"},
-				{Source: "prog2", Target: "prog2", InstallerCmd: "doexe"},
-				{Source: "prog1_arm", Target: "prog1", Keywords: []string{"arm64"}, InstallerCmd: "doexe"},
-				{Source: "prog3", Target: "prog2", Keywords: []string{"arm64"}, InstallerCmd: "doexe"},
+			installers: []installItemData{
+				{Section: "doexe", StateFamily: StateFamilyExe, Source: "prog1_x86", Target: "prog1", Base: "prog1", Keywords: []string{"amd64"}},
+				{Section: "doexe", StateFamily: StateFamilyExe, Source: "prog2", Base: "prog2"},
+				{Section: "doexe", StateFamily: StateFamilyExe, Source: "prog1_arm", Target: "prog1", Base: "prog1", Keywords: []string{"arm64"}},
+				{Section: "doexe", StateFamily: StateFamilyExe, Source: "prog3", Target: "prog2", Base: "prog2", Keywords: []string{"arm64"}},
 			},
 		},
 		{
 			name: "scenario_doexe",
-			doexe: []installItemData{
-				{Source: "custom_bin", Target: "/opt/custom/custom_bin", Dir: "/opt/custom", Base: "custom_bin", InstallerCmd: "doexe", InstallRenameCmd: "newexe", DirSwitchCmd: "exeinto"},
-				{Source: "renamed_bin_x86", Target: "/opt/other/renamed_bin", Dir: "/opt/other", Base: "renamed_bin", Keywords: []string{"amd64"}, InstallerCmd: "doexe", InstallRenameCmd: "newexe", DirSwitchCmd: "exeinto"},
-				{Source: "default_bin", Target: "", Dir: "", Base: "", InstallerCmd: "doexe", InstallRenameCmd: "newexe", DirSwitchCmd: "exeinto"},
+			installers: []installItemData{
+				{Section: "doexe", StateFamily: StateFamilyExe, Source: "custom_bin", Target: "/opt/custom/custom_bin", Dir: "/opt/custom", Base: "custom_bin"},
+				{Section: "doexe", StateFamily: StateFamilyExe, Source: "renamed_bin_x86", Target: "/opt/other/renamed_bin", Dir: "/opt/other", Base: "renamed_bin", Keywords: []string{"amd64"}},
+				{Section: "doexe", StateFamily: StateFamilyExe, Source: "default_bin", Target: "", Dir: "", Base: ""},
 			},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			data := struct {
-				Description  string
-				Homepage     string
-				License      string
-				Keywords     string
-				Bindir       string
-				ExtraInstall string
-				Archs        []any
-
-				UseFlags      []config.GentooUseFlag
-				Dodir         []string
-				Dodoc         []string
-				Doman         []string
-				Systemd       []installItemData
-				Eclasses      []string
-				InstallScript string
-			}{
-				InstallScript: func() string {
-					var stmts []installStmt
-					for _, e := range tc.doexe {
-						cmd := e.InstallerCmd
-						if e.Source != e.Base && e.InstallRenameCmd != "" {
-							cmd = e.InstallRenameCmd
-						}
-
-						var body []installStmt
-						if e.DirSwitchCmd != "" {
-							body = append(body, stateStmt{Command: e.DirSwitchCmd, Value: e.Dir})
-						}
-						target := e.Target
-						if e.Source != e.Base {
-							target = e.Base
-						} else if cmd != "dosym" && e.Target == "" {
-							target = ""
-						}
-						dieMsg := "Failed to install " + e.Source
-						if cmd == "doexe" && target == "" {
-							dieMsg = "Failed to install binary"
-						}
-						if cmd == "newexe" && target != "" {
-							dieMsg = "Failed to install binary"
-						}
-						body = append(body, actionStmt{Command: cmd, Source: e.Source, Target: target, Die: dieMsg})
-
-						if len(e.Keywords) > 0 {
-							stmts = append(stmts, conditionStmt{Expr: newArchsAndUseExpr(e.Keywords, nil), Body: body})
-						} else {
-							stmts = append(stmts, body...)
-						}
-					}
-					plan := &installPlan{Body: stmts}
-					reduced := plan.reducePlan()
-					return formatStmts(reduced.Body, "  ")
-				}(),
+			plan := buildInstallPlan(tc.bindir, nil, "", nil, tc.installers, nil, nil, nil)
+			data := ebuildData{
 				Bindir:   "/usr/bin",
 				UseFlags: gentooUseFlags(config.Gentoo{}),
+				Plan:     plan.reducePlan(),
 			}
-			var buf bytes.Buffer
-			err := template.Must(template.New("ebuild").Funcs(template.FuncMap{
-				"escape": shellEscape,
-				"indentUse": func(keywords []string, _ []string) string {
-					ind := "  "
-					if len(keywords) > 0 {
-						ind += "  "
-					}
-					return ind
-				},
-				"indent": func(keywords []string, use []string) string {
-					ind := "  "
-					if len(keywords) > 0 {
-						ind += "  "
-					}
-					if len(use) > 0 {
-						ind += "  "
-					}
-					return ind
-				},
-			}).Parse(tmplStr)).Execute(&buf, data)
+			content, err := data.RenderEbuild()
 			require.NoError(t, err)
-			golden.RequireEqualTxt(t, buf.Bytes())
+			golden.RequireEqualTxt(t, []byte(content))
 		})
 	}
 }
@@ -1697,7 +1623,7 @@ func TestEbuildData(t *testing.T) {
 		data := ebuildData{
 			Description: "foo",
 			License:     "MIT",
-			Plan:        &installPlan{Body: []installStmt{actionStmt{Command: "dosym", Source: "foo"}}},
+			Plan:        &installPlan{Body: []installStmt{actionStmt{Op: OpDosym, Source: "foo"}}},
 		}
 		require.EqualError(t, data.Validate(), "dosym requires a destination")
 	})
@@ -1706,7 +1632,7 @@ func TestEbuildData(t *testing.T) {
 		data := ebuildData{
 			Description: "foo",
 			License:     "MIT",
-			Plan:        &installPlan{Body: []installStmt{actionStmt{Command: "dosym", Source: "foo", Target: "bar"}}},
+			Plan:        &installPlan{Body: []installStmt{actionStmt{Op: OpDosym, Source: "foo", Target: "bar"}}},
 		}
 		require.NoError(t, data.Validate())
 	})

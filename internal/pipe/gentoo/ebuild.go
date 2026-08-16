@@ -38,15 +38,14 @@ type archData struct {
 }
 
 type installItemData struct {
-	Source           string
-	Target           string
-	Dir              string
-	Base             string
-	Use              []string
-	Keywords         []string
-	InstallerCmd     string
-	InstallRenameCmd string
-	DirSwitchCmd     string
+	Source      string
+	Target      string
+	Dir         string
+	Base        string
+	Use         []string
+	Keywords    []string
+	Section     string
+	StateFamily StateFamily
 }
 
 type ebuildData struct {
@@ -59,9 +58,6 @@ type ebuildData struct {
 	ExtraInstall string
 	Archs        []archData
 	UseFlags     []config.GentooUseFlag
-	Dodir        []string
-	Dodoc        []string
-	Doman        []string
 	Systemd      []installItemData
 	Eclasses     []string
 	Plan         *installPlan
@@ -92,11 +88,11 @@ func shellEscape(s string) string {
 	return s
 }
 
-func (d ebuildData) InstallScript() string {
+func (d ebuildData) InstallScript(indent string) string {
 	if d.Plan == nil {
 		return ""
 	}
-	return formatStmts(d.Plan.Body, "  ")
+	return d.Plan.String(indent)
 }
 
 func (d ebuildData) RenderEbuild() (string, error) {
@@ -268,8 +264,34 @@ func (v *extraFilesProcessor) validate(name, src string) error {
 	return nil
 }
 
+func resolveStateFamily(sectionName, dir, defaultDir string) (StateFamily, string) {
+	switch sectionName {
+	case "doins":
+		if dir == "" {
+			dir = defaultDir
+		}
+		return StateFamilyIns, dir
+	case "doexe":
+		if dir == "" {
+			dir = defaultDir
+		}
+		return StateFamilyExe, dir
+	case "dobin", "dosbin":
+		if dir != "" {
+			return StateFamilyBin, dir
+		}
+		return StateFamilyNone, ""
+	case "dodoc":
+		if dir != "" {
+			return StateFamilyDoc, dir
+		}
+		return StateFamilyNone, ""
+	default:
+		return StateFamilyNone, ""
+	}
+}
+
 func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []config.GentooInstallItem, defaultDir string) ([]installItemData, error) {
-	var installerCmd, installRenameCmd, dirSwitchCmd string
 	var items []installItemData
 	for _, d := range cfgItems {
 		if d.Src == "" && d.SrcID == "" {
@@ -349,33 +371,17 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 					base = path.Base(filepath.ToSlash(srcPath))
 				}
 
-				installerCmd = sectionName
-				installRenameCmd = "new" + strings.TrimPrefix(sectionName, "do")
-				dirSwitchCmd = ""
-				switch sectionName {
-				case "systemd":
-					installerCmd = "systemd_dounit"
-					installRenameCmd = "systemd_newunit"
-				case "dosym":
-					installerCmd = "dosym"
-					installRenameCmd = "dosym"
-				case "doins", "doexe":
-					dirSwitchCmd = strings.TrimPrefix(sectionName, "do") + "into"
-					if dir == "" {
-						dir = defaultDir
-					}
-				}
+				stateFamily, stateDir := resolveStateFamily(sectionName, dir, defaultDir)
 
 				items = append(items, installItemData{
-					Source:           srcPath,
-					Target:           target,
-					Dir:              dir,
-					Base:             base,
-					Use:              d.Use,
-					Keywords:         keywords,
-					InstallerCmd:     installerCmd,
-					InstallRenameCmd: installRenameCmd,
-					DirSwitchCmd:     dirSwitchCmd,
+					Source:      srcPath,
+					Target:      target,
+					Dir:         stateDir,
+					Base:        base,
+					Use:         d.Use,
+					Keywords:    keywords,
+					Section:     sectionName,
+					StateFamily: stateFamily,
 				})
 			} else {
 				bins := firstBins
@@ -406,33 +412,17 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 						}
 					}
 
-					installerCmd = sectionName
-					installRenameCmd = "new" + strings.TrimPrefix(sectionName, "do")
-					dirSwitchCmd = ""
-					switch sectionName {
-					case "systemd":
-						installerCmd = "systemd_dounit"
-						installRenameCmd = "systemd_newunit"
-					case "dosym":
-						installerCmd = "dosym"
-						installRenameCmd = "dosym"
-					case "doins", "doexe":
-						dirSwitchCmd = strings.TrimPrefix(sectionName, "do") + "into"
-						if dir == "" {
-							dir = defaultDir
-						}
-					}
+					stateFamily, stateDir := resolveStateFamily(sectionName, dir, defaultDir)
 
 					items = append(items, installItemData{
-						Source:           sourcePath,
-						Target:           target,
-						Dir:              dir,
-						Base:             base,
-						Use:              d.Use,
-						Keywords:         keywords,
-						InstallerCmd:     installerCmd,
-						InstallRenameCmd: installRenameCmd,
-						DirSwitchCmd:     dirSwitchCmd,
+						Source:      sourcePath,
+						Target:      target,
+						Dir:         stateDir,
+						Base:        base,
+						Use:         d.Use,
+						Keywords:    keywords,
+						Section:     sectionName,
+						StateFamily: stateFamily,
 					})
 				}
 			}
@@ -453,33 +443,17 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 			base = path.Base(filepath.ToSlash(src))
 		}
 
-		installerCmd = sectionName
-		installRenameCmd = "new" + strings.TrimPrefix(sectionName, "do")
-		dirSwitchCmd = ""
-		switch sectionName {
-		case "systemd":
-			installerCmd = "systemd_dounit"
-			installRenameCmd = "systemd_newunit"
-		case "dosym":
-			installerCmd = "dosym"
-			installRenameCmd = "dosym"
-		case "doins", "doexe":
-			dirSwitchCmd = strings.TrimPrefix(sectionName, "do") + "into"
-			if dir == "" {
-				dir = defaultDir
-			}
-		}
+		stateFamily, stateDir := resolveStateFamily(sectionName, dir, defaultDir)
 
 		items = append(items, installItemData{
-			Source:           src,
-			Target:           d.Dst,
-			Dir:              dir,
-			Base:             base,
-			Use:              d.Use,
-			Keywords:         keywords,
-			InstallerCmd:     installerCmd,
-			InstallRenameCmd: installRenameCmd,
-			DirSwitchCmd:     dirSwitchCmd,
+			Source:      src,
+			Target:      d.Dst,
+			Dir:         stateDir,
+			Base:        base,
+			Use:         d.Use,
+			Keywords:    keywords,
+			Section:     sectionName,
+			StateFamily: stateFamily,
 		})
 	}
 	return items, nil

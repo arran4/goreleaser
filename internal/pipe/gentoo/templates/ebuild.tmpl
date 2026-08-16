@@ -29,7 +29,7 @@ IUSE="{{ range $i, $flag := .UseFlags }}{{ if $i }} {{ end }}{{ $flag.Flag }}{{ 
 S="${WORKDIR}"
 
 src_install() {
-{{- if .InstallScript }}
-{{ .InstallScript }}
+{{- if .Plan }}
+{{ .InstallScript "  " }}
 {{- end }}
 }

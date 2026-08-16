@@ -6,385 +6,596 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestConditionExpr_String(t *testing.T) {
-	tests := []struct {
+func TestConditionExprPrecedenceShellAndString(t *testing.T) {
+	a := UseExpr{Flag: "a"}
+	b := UseExpr{Flag: "b"}
+	c := UseExpr{Flag: "c"}
+	d := UseExpr{Flag: "d"}
+
+	testCases := []struct {
 		name     string
 		expr     conditionExpr
 		expected string
+		shell    string
 	}{
 		{
-			name:     "ArchExpr",
+			name:     "atomic Arch",
 			expr:     ArchExpr{Arch: "amd64"},
 			expected: "Arch(amd64)",
+			shell:    "use amd64",
 		},
 		{
-			name:     "UseExpr",
+			name:     "atomic Use",
 			expr:     UseExpr{Flag: "extended"},
 			expected: "Use(extended)",
+			shell:    "use extended",
 		},
 		{
-			name:     "NotExpr of Use",
+			name:     "NOT atomic",
 			expr:     NewNotExpr(UseExpr{Flag: "extended"}),
 			expected: "NOT(Use(extended))",
+			shell:    "! use extended",
 		},
 		{
-			name:     "NotExpr of Arch",
-			expr:     NewNotExpr(ArchExpr{Arch: "arm64"}),
-			expected: "NOT(Arch(arm64))",
+			name:     "AND(A, OR(B, C))",
+			expr:     NewAndExpr(a, NewOrExpr(b, c)),
+			expected: "AND(OR(Use(b), Use(c)), Use(a))",
+			shell:    "{ use b || use c; } && use a",
 		},
 		{
-			name: "AndExpr canonical sorting",
-			expr: NewAndExpr(
-				UseExpr{Flag: "extended"},
-				ArchExpr{Arch: "arm64"},
-			),
-			expected: "AND(Arch(arm64), Use(extended))",
+			name:     "AND(A, OR(B, C)) direct struct",
+			expr:     AndExpr{Exprs: []conditionExpr{a, OrExpr{Exprs: []conditionExpr{b, c}}}},
+			expected: "AND(Use(a), OR(Use(b), Use(c)))",
+			shell:    "use a && { use b || use c; }",
 		},
 		{
-			name: "AndExpr with NOT and Arch",
-			expr: NewAndExpr(
-				NewNotExpr(UseExpr{Flag: "extended"}),
-				ArchExpr{Arch: "arm64"},
-			),
-			expected: "AND(Arch(arm64), NOT(Use(extended)))",
+			name:     "OR(A, AND(B, C))",
+			expr:     OrExpr{Exprs: []conditionExpr{a, AndExpr{Exprs: []conditionExpr{b, c}}}},
+			expected: "OR(Use(a), AND(Use(b), Use(c)))",
+			shell:    "use a || { use b && use c; }",
 		},
 		{
-			name: "OrExpr canonical sorting",
-			expr: NewOrExpr(
-				ArchExpr{Arch: "arm64"},
-				ArchExpr{Arch: "amd64"},
-			),
-			expected: "OR(Arch(amd64), Arch(arm64))",
+			name:     "NOT(AND(A, B))",
+			expr:     NotExpr{Expr: AndExpr{Exprs: []conditionExpr{a, b}}},
+			expected: "NOT(AND(Use(a), Use(b)))",
+			shell:    "! { use a && use b; }",
+		},
+		{
+			name:     "NOT(OR(A, B))",
+			expr:     NotExpr{Expr: OrExpr{Exprs: []conditionExpr{a, b}}},
+			expected: "NOT(OR(Use(a), Use(b)))",
+			shell:    "! { use a || use b; }",
+		},
+		{
+			name:     "AND(A, NOT(OR(B, C)))",
+			expr:     AndExpr{Exprs: []conditionExpr{a, NotExpr{Expr: OrExpr{Exprs: []conditionExpr{b, c}}}}},
+			expected: "AND(Use(a), NOT(OR(Use(b), Use(c))))",
+			shell:    "use a && ! { use b || use c; }",
+		},
+		{
+			name: "nested combinations several levels deep",
+			expr: AndExpr{
+				Exprs: []conditionExpr{
+					a,
+					OrExpr{
+						Exprs: []conditionExpr{
+							b,
+							AndExpr{
+								Exprs: []conditionExpr{c, d},
+							},
+						},
+					},
+				},
+			},
+			expected: "AND(Use(a), OR(Use(b), AND(Use(c), Use(d))))",
+			shell:    "use a && { use b || { use c && use d; }; }",
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.expected, tt.expr.String())
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.expected, tc.expr.String())
+			require.Equal(t, tc.shell, tc.expr.Shell())
 		})
 	}
 }
 
-func TestConditionExpr_Shell(t *testing.T) {
-	tests := []struct {
+func TestConditionExprAlgebra(t *testing.T) {
+	t.Run("double negation", func(t *testing.T) {
+		inner := UseExpr{Flag: "foo"}
+		not := NewNotExpr(inner)
+		require.Equal(t, "NOT(Use(foo))", not.String())
+		notNot := NewNotExpr(not)
+		require.Equal(t, "Use(foo)", notNot.String())
+		require.True(t, inner.Equals(notNot))
+	})
+
+	t.Run("AND flattening and deduplication", func(t *testing.T) {
+		a := ArchExpr{Arch: "amd64"}
+		b := UseExpr{Flag: "extended"}
+		c := UseExpr{Flag: "foo"}
+
+		and1 := NewAndExpr(a, b)
+		and2 := NewAndExpr(and1, c, a) // flattened & deduplicated
+		require.Equal(t, "AND(Arch(amd64), Use(extended), Use(foo))", and2.String())
+	})
+
+	t.Run("OR flattening and deduplication", func(t *testing.T) {
+		a := ArchExpr{Arch: "amd64"}
+		b := ArchExpr{Arch: "arm64"}
+
+		or1 := NewOrExpr(a, b)
+		or2 := NewOrExpr(or1, a)
+		require.Equal(t, "OR(Arch(amd64), Arch(arm64))", or2.String())
+	})
+
+	t.Run("Single element simplification", func(t *testing.T) {
+		a := ArchExpr{Arch: "amd64"}
+		require.Equal(t, a, NewAndExpr(a))
+		require.Equal(t, a, NewOrExpr(a))
+		require.Nil(t, NewAndExpr())
+		require.Nil(t, NewOrExpr())
+		require.Nil(t, NewNotExpr(nil))
+	})
+}
+
+func TestUniversalArchSimplification(t *testing.T) {
+	universe := []string{"amd64", "arm64"}
+
+	t.Run("Universal Arch at root", func(t *testing.T) {
+		or := NewOrExpr(ArchExpr{Arch: "amd64"}, ArchExpr{Arch: "arm64"})
+		require.True(t, isUniversalArchExpr(or, universe))
+		require.Nil(t, simplifyExpr(or, universe))
+	})
+
+	t.Run("Single-arch universe", func(t *testing.T) {
+		singleUniverse := []string{"amd64"}
+		arch := ArchExpr{Arch: "amd64"}
+		require.True(t, isUniversalArchExpr(arch, singleUniverse))
+		require.Nil(t, simplifyExpr(arch, singleUniverse))
+	})
+
+	t.Run("Partial arch set is not universal", func(t *testing.T) {
+		arch := ArchExpr{Arch: "amd64"}
+		require.False(t, isUniversalArchExpr(arch, universe))
+		require.Equal(t, arch, simplifyExpr(arch, universe))
+	})
+
+	t.Run("AND(UniversalArch, Use(foo)) simplifies to Use(foo)", func(t *testing.T) {
+		univ := NewOrExpr(ArchExpr{Arch: "amd64"}, ArchExpr{Arch: "arm64"})
+		foo := UseExpr{Flag: "foo"}
+		and := NewAndExpr(univ, foo)
+		simplified := simplifyExpr(and, universe)
+		require.Equal(t, foo, simplified)
+	})
+
+	t.Run("OR(UniversalArch, Use(foo)) simplifies to nil (true)", func(t *testing.T) {
+		univ := NewOrExpr(ArchExpr{Arch: "amd64"}, ArchExpr{Arch: "arm64"})
+		foo := UseExpr{Flag: "foo"}
+		or := NewOrExpr(univ, foo)
+		simplified := simplifyExpr(or, universe)
+		require.Nil(t, simplified)
+	})
+
+	t.Run("nested AND containing UniversalArch", func(t *testing.T) {
+		univ := NewOrExpr(ArchExpr{Arch: "amd64"}, ArchExpr{Arch: "arm64"})
+		foo := UseExpr{Flag: "foo"}
+		bar := UseExpr{Flag: "bar"}
+		nested := NewAndExpr(foo, NewAndExpr(univ, bar))
+		simplified := simplifyExpr(nested, universe)
+		require.Equal(t, NewAndExpr(foo, bar), simplified)
+	})
+
+	t.Run("reducer unwraps universal arch condition block", func(t *testing.T) {
+		plan := &installPlan{
+			UniverseArchitectures: universe,
+			Body: []installStmt{
+				conditionStmt{
+					Expr: NewOrExpr(ArchExpr{Arch: "amd64"}, ArchExpr{Arch: "arm64"}),
+					Body: []installStmt{
+						actionStmt{Op: OpDoexe, Source: "app"},
+					},
+				},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 1)
+		require.IsType(t, actionStmt{}, reduced.Body[0])
+		require.Equal(t, "doexe \"app\"\n", reduced.Body[0].String(""))
+	})
+
+	t.Run("reducer retains partial arch condition block", func(t *testing.T) {
+		plan := &installPlan{
+			UniverseArchitectures: universe,
+			Body: []installStmt{
+				conditionStmt{
+					Expr: ArchExpr{Arch: "amd64"},
+					Body: []installStmt{
+						actionStmt{Op: OpDoexe, Source: "app"},
+					},
+				},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 1)
+		require.IsType(t, conditionStmt{}, reduced.Body[0])
+	})
+}
+
+func TestSemanticInstallOperations(t *testing.T) {
+	testCases := []struct {
 		name     string
-		expr     conditionExpr
+		stmt     actionStmt
 		expected string
 	}{
 		{
-			name:     "ArchExpr",
-			expr:     ArchExpr{Arch: "amd64"},
-			expected: "use amd64",
+			name:     "doexe",
+			stmt:     actionStmt{Op: OpDoexe, Source: "prog"},
+			expected: "doexe \"prog\"\n",
 		},
 		{
-			name:     "UseExpr",
-			expr:     UseExpr{Flag: "extended"},
-			expected: "use extended",
+			name:     "newexe",
+			stmt:     actionStmt{Op: OpNewexe, Source: "prog_x86", Target: "prog", Die: "Failed to install prog"},
+			expected: "newexe \"prog_x86\" \"prog\" || die \"Failed to install prog\"\n",
 		},
 		{
-			name:     "NotExpr of Use",
-			expr:     NewNotExpr(UseExpr{Flag: "extended"}),
-			expected: "! use extended",
+			name:     "doins",
+			stmt:     actionStmt{Op: OpDoins, Source: "config.yaml"},
+			expected: "doins \"config.yaml\"\n",
 		},
 		{
-			name: "AndExpr with Arch and NOT Use",
-			expr: NewAndExpr(
-				ArchExpr{Arch: "arm64"},
-				NewNotExpr(UseExpr{Flag: "extended"}),
-			),
-			expected: "use arm64 && ! use extended",
+			name:     "newins",
+			stmt:     actionStmt{Op: OpNewins, Source: "config.example", Target: "config.yaml"},
+			expected: "newins \"config.example\" \"config.yaml\"\n",
 		},
 		{
-			name: "OrExpr with multiple Archs",
-			expr: NewOrExpr(
-				ArchExpr{Arch: "amd64"},
-				ArchExpr{Arch: "arm64"},
-			),
-			expected: "use amd64 || use arm64",
+			name:     "dobin",
+			stmt:     actionStmt{Op: OpDobin, Source: "bin/cli"},
+			expected: "dobin \"bin/cli\"\n",
+		},
+		{
+			name:     "newbin",
+			stmt:     actionStmt{Op: OpNewbin, Source: "bin/cli_v2", Target: "cli"},
+			expected: "newbin \"bin/cli_v2\" \"cli\"\n",
+		},
+		{
+			name:     "dosbin",
+			stmt:     actionStmt{Op: OpDosbin, Source: "sbin/daemon"},
+			expected: "dosbin \"sbin/daemon\"\n",
+		},
+		{
+			name:     "newsbin",
+			stmt:     actionStmt{Op: OpNewsbin, Source: "sbin/daemon_v2", Target: "daemon"},
+			expected: "newsbin \"sbin/daemon_v2\" \"daemon\"\n",
+		},
+		{
+			name:     "doconfd",
+			stmt:     actionStmt{Op: OpDoconfd, Source: "foo.confd"},
+			expected: "doconfd \"foo.confd\"\n",
+		},
+		{
+			name:     "newconfd",
+			stmt:     actionStmt{Op: OpNewconfd, Source: "foo.confd", Target: "foo"},
+			expected: "newconfd \"foo.confd\" \"foo\"\n",
+		},
+		{
+			name:     "doenvd",
+			stmt:     actionStmt{Op: OpDoenvd, Source: "99foo"},
+			expected: "doenvd \"99foo\"\n",
+		},
+		{
+			name:     "newenvd",
+			stmt:     actionStmt{Op: OpNewenvd, Source: "99foo", Target: "99foo_renamed"},
+			expected: "newenvd \"99foo\" \"99foo_renamed\"\n",
+		},
+		{
+			name:     "doheader",
+			stmt:     actionStmt{Op: OpDoheader, Source: "foo.h"},
+			expected: "doheader \"foo.h\"\n",
+		},
+		{
+			name:     "newheader",
+			stmt:     actionStmt{Op: OpNewheader, Source: "foo_impl.h", Target: "foo.h"},
+			expected: "newheader \"foo_impl.h\" \"foo.h\"\n",
+		},
+		{
+			name:     "doinitd",
+			stmt:     actionStmt{Op: OpDoinitd, Source: "foo.initd"},
+			expected: "doinitd \"foo.initd\"\n",
+		},
+		{
+			name:     "newinitd",
+			stmt:     actionStmt{Op: OpNewinitd, Source: "foo.initd", Target: "foo"},
+			expected: "newinitd \"foo.initd\" \"foo\"\n",
+		},
+		{
+			name:     "systemd_dounit",
+			stmt:     actionStmt{Op: OpSystemdDounit, Source: "foo.service"},
+			expected: "systemd_dounit \"foo.service\"\n",
+		},
+		{
+			name:     "systemd_newunit argument shape",
+			stmt:     actionStmt{Op: OpSystemdNewunit, Source: "foo.service", Target: "bar.service", Die: "Failed to install unit"},
+			expected: "systemd_newunit \"foo.service\" \"bar.service\" || die \"Failed to install unit\"\n",
+		},
+		{
+			name:     "dosym",
+			stmt:     actionStmt{Op: OpDosym, Source: "target", Target: "linkpath", Die: "Failed to create symlink"},
+			expected: "dosym \"target\" \"linkpath\" || die \"Failed to create symlink\"\n",
+		},
+		{
+			name:     "dodoc",
+			stmt:     actionStmt{Op: OpDodoc, Source: "README.md"},
+			expected: "dodoc \"README.md\"\n",
+		},
+		{
+			name:     "newdoc",
+			stmt:     actionStmt{Op: OpNewdoc, Source: "README.txt", Target: "README"},
+			expected: "newdoc \"README.txt\" \"README\"\n",
+		},
+		{
+			name:     "doman",
+			stmt:     actionStmt{Op: OpDoman, Source: "foo.1"},
+			expected: "doman \"foo.1\"\n",
+		},
+		{
+			name:     "newman",
+			stmt:     actionStmt{Op: OpNewman, Source: "foo_man.1", Target: "foo.1"},
+			expected: "newman \"foo_man.1\" \"foo.1\"\n",
+		},
+		{
+			name:     "dodir",
+			stmt:     actionStmt{Op: OpDodir, Source: "/var/lib/myapp"},
+			expected: "dodir \"/var/lib/myapp\"\n",
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.expected, tt.expr.Shell())
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.expected, tc.stmt.String(""))
+			require.NoError(t, tc.stmt.Validate())
 		})
 	}
 }
 
-func TestConditionExpr_Algebra(t *testing.T) {
-	t.Run("Double negation elimination", func(t *testing.T) {
-		orig := UseExpr{Flag: "extended"}
-		not1 := NewNotExpr(orig)
-		not2 := NewNotExpr(not1)
-		require.Equal(t, orig, not2)
-		require.Equal(t, "Use(extended)", not2.String())
+func TestDestinationStateModeling(t *testing.T) {
+	t.Run("same state repeated is deduplicated", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				stateStmt{Family: StateFamilyExe, Value: "/usr/bin"},
+				actionStmt{Op: OpDoexe, Source: "app1"},
+				stateStmt{Family: StateFamilyExe, Value: "/usr/bin"},
+				actionStmt{Op: OpDoexe, Source: "app2"},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 3)
+		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: "/usr/bin"}, reduced.Body[0])
+		require.Equal(t, actionStmt{Op: OpDoexe, Source: "app1"}, reduced.Body[1])
+		require.Equal(t, actionStmt{Op: OpDoexe, Source: "app2"}, reduced.Body[2])
 	})
 
-	t.Run("Nested AND flattening", func(t *testing.T) {
-		a := ArchExpr{Arch: "amd64"}
-		b := UseExpr{Flag: "foo"}
-		c := UseExpr{Flag: "bar"}
-		nested := NewAndExpr(a, NewAndExpr(b, c))
-		require.Equal(t, "AND(Arch(amd64), Use(bar), Use(foo))", nested.String())
+	t.Run("state change is retained", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				stateStmt{Family: StateFamilyExe, Value: "/usr/bin"},
+				actionStmt{Op: OpDoexe, Source: "app1"},
+				stateStmt{Family: StateFamilyExe, Value: "/opt/bin"},
+				actionStmt{Op: OpDoexe, Source: "app2"},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 4)
 	})
 
-	t.Run("Nested OR flattening", func(t *testing.T) {
-		a := ArchExpr{Arch: "amd64"}
-		b := ArchExpr{Arch: "arm64"}
-		c := ArchExpr{Arch: "riscv"}
-		nested := NewOrExpr(a, NewOrExpr(b, c))
-		require.Equal(t, "OR(Arch(amd64), Arch(arm64), Arch(riscv))", nested.String())
+	t.Run("state inside conditional is local and does not eliminate required state outside", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				conditionStmt{
+					Expr: UseExpr{Flag: "custom"},
+					Body: []installStmt{
+						stateStmt{Family: StateFamilyExe, Value: "/opt/bin"},
+						actionStmt{Op: OpDoexe, Source: "app_custom"},
+					},
+				},
+				stateStmt{Family: StateFamilyExe, Value: "/opt/bin"},
+				actionStmt{Op: OpDoexe, Source: "app_main"},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 3)
+		require.IsType(t, conditionStmt{}, reduced.Body[0])
+		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: "/opt/bin"}, reduced.Body[1])
+		require.Equal(t, actionStmt{Op: OpDoexe, Source: "app_main"}, reduced.Body[2])
 	})
 
-	t.Run("AND deduplication", func(t *testing.T) {
-		a := ArchExpr{Arch: "amd64"}
-		b := UseExpr{Flag: "foo"}
-		and := NewAndExpr(a, b, a, b)
-		require.Equal(t, "AND(Arch(amd64), Use(foo))", and.String())
-	})
-
-	t.Run("OR deduplication", func(t *testing.T) {
-		a := ArchExpr{Arch: "amd64"}
-		b := ArchExpr{Arch: "arm64"}
-		or := NewOrExpr(a, b, a)
-		require.Equal(t, "OR(Arch(amd64), Arch(arm64))", or.String())
-	})
-
-	t.Run("Single term simplification", func(t *testing.T) {
-		a := ArchExpr{Arch: "amd64"}
-		and := NewAndExpr(a)
-		or := NewOrExpr(a)
-		require.Equal(t, a, and)
-		require.Equal(t, a, or)
+	t.Run("state families are independent (exeinto vs insinto vs into)", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				stateStmt{Family: StateFamilyExe, Value: "/usr/bin"},
+				stateStmt{Family: StateFamilyIns, Value: "/etc/myapp"},
+				stateStmt{Family: StateFamilyBin, Value: "/usr"},
+				actionStmt{Op: OpDoexe, Source: "app"},
+				actionStmt{Op: OpDoins, Source: "config.yaml"},
+				actionStmt{Op: OpDobin, Source: "tool"},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 6)
 	})
 }
 
-func TestUniversalArchDetection(t *testing.T) {
-	universe := []string{"amd64", "arm64"}
+func TestRawStatementRendering(t *testing.T) {
+	t.Run("single raw line", func(t *testing.T) {
+		stmt := rawStmt{Content: "echo \"hello\""}
+		require.Equal(t, "  echo \"hello\"\n", stmt.String("  "))
+	})
 
-	require.True(t, isUniversalArchExpr(NewOrExpr(ArchExpr{Arch: "amd64"}, ArchExpr{Arch: "arm64"}), universe))
-	require.False(t, isUniversalArchExpr(ArchExpr{Arch: "amd64"}, universe))
-	require.False(t, isUniversalArchExpr(UseExpr{Flag: "amd64"}, universe))
-	require.False(t, isUniversalArchExpr(NewOrExpr(ArchExpr{Arch: "amd64"}, UseExpr{Flag: "arm64"}), universe))
+	t.Run("multiline raw with relative indentation", func(t *testing.T) {
+		stmt := rawStmt{Content: "if foo; then\n    bar\nfi"}
+		expected := "  if foo; then\n      bar\n  fi\n"
+		require.Equal(t, expected, stmt.String("  "))
+	})
 
-	singleUniverse := []string{"amd64"}
-	require.True(t, isUniversalArchExpr(ArchExpr{Arch: "amd64"}, singleUniverse))
-	require.False(t, isUniversalArchExpr(UseExpr{Flag: "amd64"}, singleUniverse))
+	t.Run("blank line and trailing newline", func(t *testing.T) {
+		stmt := rawStmt{Content: "line1\n\nline2\n"}
+		expected := "  line1\n\n  line2\n\n"
+		require.Equal(t, expected, stmt.String("  "))
+	})
+
+	t.Run("raw nested inside condition with custom indent", func(t *testing.T) {
+		cond := conditionStmt{
+			Expr: UseExpr{Flag: "foo"},
+			Body: []installStmt{
+				rawStmt{Content: "setup_env\nrun_setup"},
+			},
+		}
+		expected := ">>>>if use foo; then\n>>>>  setup_env\n>>>>  run_setup\n>>>>fi\n"
+		require.Equal(t, expected, cond.String(">>>>"))
+	})
 }
 
-func TestReducer(t *testing.T) {
-	universe := []string{"amd64", "arm64"}
+func TestInitialIndentationInput(t *testing.T) {
+	plan := &installPlan{
+		Body: []installStmt{
+			conditionStmt{
+				Expr: UseExpr{Flag: "foo"},
+				Body: []installStmt{
+					conditionStmt{
+						Expr: UseExpr{Flag: "bar"},
+						Body: []installStmt{
+							actionStmt{Op: OpDoexe, Source: "app"},
+						},
+					},
+				},
+			},
+		},
+	}
+	rendered := plan.String(">>>>")
+	expected := ">>>>if use foo; then\n>>>>  if use bar; then\n>>>>    doexe \"app\"\n>>>>  fi\n>>>>fi"
+	require.Equal(t, expected, rendered)
+}
 
-	tests := []struct {
-		name     string
-		input    []installStmt
-		expected []installStmt
-	}{
-		{
-			name: "universal architecture condition -> removed",
-			input: []installStmt{
-				conditionStmt{
-					Expr: newArchsAndUseExpr([]string{"amd64", "arm64"}, nil),
-					Body: []installStmt{
-						actionStmt{Command: "doexe", Source: "foo"},
-					},
+func TestFactoringPreservesStatementOrdering(t *testing.T) {
+	// Condition X -> A
+	// Raw -> R
+	// Condition X -> B
+	// Must NOT factor A and B together across R!
+	plan := &installPlan{
+		Body: []installStmt{
+			conditionStmt{
+				Expr: UseExpr{Flag: "x"},
+				Body: []installStmt{
+					actionStmt{Op: OpDoexe, Source: "a"},
 				},
 			},
-			expected: []installStmt{
-				actionStmt{Command: "doexe", Source: "foo"},
-			},
-		},
-		{
-			name: "partial architecture condition -> retained",
-			input: []installStmt{
-				conditionStmt{
-					Expr: newArchsAndUseExpr([]string{"amd64"}, nil),
-					Body: []installStmt{
-						actionStmt{Command: "doexe", Source: "foo"},
-					},
-				},
-			},
-			expected: []installStmt{
-				conditionStmt{
-					Expr: newArchsAndUseExpr([]string{"amd64"}, nil),
-					Body: []installStmt{
-						actionStmt{Command: "doexe", Source: "foo"},
-					},
+			rawStmt{Content: "echo \"step in between\""},
+			conditionStmt{
+				Expr: UseExpr{Flag: "x"},
+				Body: []installStmt{
+					actionStmt{Op: OpDoexe, Source: "b"},
 				},
 			},
 		},
-		{
-			name: "redundant state setter -> removed",
-			input: []installStmt{
-				stateStmt{Command: "exeinto", Value: "/opt/bin"},
-				stateStmt{Command: "exeinto", Value: "/opt/bin"},
-				actionStmt{Command: "doexe", Source: "foo"},
-			},
-			expected: []installStmt{
-				stateStmt{Command: "exeinto", Value: "/opt/bin"},
-				actionStmt{Command: "doexe", Source: "foo"},
-			},
-		},
-		{
-			name: "non-mutating conditional preserves incoming state",
-			input: []installStmt{
-				stateStmt{Command: "exeinto", Value: "/opt/bin"},
-				conditionStmt{
-					Expr: newArchsAndUseExpr([]string{"amd64"}, nil),
-					Body: []installStmt{
-						actionStmt{Command: "doexe", Source: "foo"},
-					},
-				},
-				stateStmt{Command: "exeinto", Value: "/opt/bin"},
-				actionStmt{Command: "doexe", Source: "bar"},
-			},
-			expected: []installStmt{
-				stateStmt{Command: "exeinto", Value: "/opt/bin"},
-				conditionStmt{
-					Expr: newArchsAndUseExpr([]string{"amd64"}, nil),
-					Body: []installStmt{
-						actionStmt{Command: "doexe", Source: "foo"},
-					},
-				},
-				actionStmt{Command: "doexe", Source: "bar"},
-			},
-		},
-		{
-			name: "conditional state change causes divergent/unknown outgoing state",
-			input: []installStmt{
-				stateStmt{Command: "exeinto", Value: "/opt/bin"},
-				conditionStmt{
-					Expr: newArchsAndUseExpr([]string{"amd64"}, nil),
-					Body: []installStmt{
-						stateStmt{Command: "exeinto", Value: "/usr/bin"},
-						actionStmt{Command: "doexe", Source: "foo"},
-					},
-				},
-				stateStmt{Command: "exeinto", Value: "/opt/bin"},
-				actionStmt{Command: "doexe", Source: "bar"},
-			},
-			expected: []installStmt{
-				stateStmt{Command: "exeinto", Value: "/opt/bin"},
-				conditionStmt{
-					Expr: newArchsAndUseExpr([]string{"amd64"}, nil),
-					Body: []installStmt{
-						stateStmt{Command: "exeinto", Value: "/usr/bin"},
-						actionStmt{Command: "doexe", Source: "foo"},
-					},
-				},
-				stateStmt{Command: "exeinto", Value: "/opt/bin"},
-				actionStmt{Command: "doexe", Source: "bar"},
-			},
-		},
-		{
-			name: "exact sibling predicates merge",
-			input: []installStmt{
+	}
+	reduced := plan.reducePlan()
+	require.Len(t, reduced.Body, 3)
+	require.IsType(t, conditionStmt{}, reduced.Body[0])
+	require.IsType(t, rawStmt{}, reduced.Body[1])
+	require.IsType(t, conditionStmt{}, reduced.Body[2])
+}
+
+func TestSiblingConditionMergingAndFactoring(t *testing.T) {
+	t.Run("exact sibling conditions merged", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
 				conditionStmt{
 					Expr: ArchExpr{Arch: "amd64"},
 					Body: []installStmt{
-						actionStmt{Command: "doexe", Source: "prog1"},
+						actionStmt{Op: OpDoexe, Source: "app1"},
 					},
 				},
 				conditionStmt{
 					Expr: ArchExpr{Arch: "amd64"},
 					Body: []installStmt{
-						actionStmt{Command: "doexe", Source: "prog2"},
+						actionStmt{Op: OpDoexe, Source: "app2"},
 					},
 				},
 			},
-			expected: []installStmt{
-				conditionStmt{
-					Expr: ArchExpr{Arch: "amd64"},
-					Body: []installStmt{
-						actionStmt{Command: "doexe", Source: "prog1"},
-						actionStmt{Command: "doexe", Source: "prog2"},
-					},
-				},
-			},
-		},
-		{
-			name: "recursive factoring of sibling statement conditions into nested conditions",
-			input: []installStmt{
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 1)
+		cond := reduced.Body[0].(conditionStmt)
+		require.Equal(t, ArchExpr{Arch: "amd64"}, cond.Expr)
+		require.Len(t, cond.Body, 2)
+	})
+
+	t.Run("factoring common architecture with nested positive and negative USE", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
 				conditionStmt{
 					Expr: NewAndExpr(ArchExpr{Arch: "amd64"}, UseExpr{Flag: "extended"}),
-					Body: []installStmt{actionStmt{Command: "newexe", Source: "prog1_x86", Target: "prog1"}},
+					Body: []installStmt{
+						actionStmt{Op: OpDoexe, Source: "app_ext"},
+					},
 				},
 				conditionStmt{
 					Expr: NewAndExpr(ArchExpr{Arch: "amd64"}, NewNotExpr(UseExpr{Flag: "extended"})),
-					Body: []installStmt{actionStmt{Command: "newexe", Source: "prog2_x86", Target: "prog2"}},
-				},
-				conditionStmt{
-					Expr: NewAndExpr(ArchExpr{Arch: "arm64"}, UseExpr{Flag: "extended"}),
-					Body: []installStmt{actionStmt{Command: "newexe", Source: "prog1_arm", Target: "prog1"}},
-				},
-				conditionStmt{
-					Expr: NewAndExpr(ArchExpr{Arch: "arm64"}, NewNotExpr(UseExpr{Flag: "extended"})),
-					Body: []installStmt{actionStmt{Command: "newexe", Source: "prog2_arm", Target: "prog2"}},
-				},
-			},
-			expected: []installStmt{
-				conditionStmt{
-					Expr: ArchExpr{Arch: "amd64"},
 					Body: []installStmt{
-						conditionStmt{
-							Expr: UseExpr{Flag: "extended"},
-							Body: []installStmt{actionStmt{Command: "newexe", Source: "prog1_x86", Target: "prog1"}},
-						},
-						conditionStmt{
-							Expr: NewNotExpr(UseExpr{Flag: "extended"}),
-							Body: []installStmt{actionStmt{Command: "newexe", Source: "prog2_x86", Target: "prog2"}},
-						},
-					},
-				},
-				conditionStmt{
-					Expr: ArchExpr{Arch: "arm64"},
-					Body: []installStmt{
-						conditionStmt{
-							Expr: UseExpr{Flag: "extended"},
-							Body: []installStmt{actionStmt{Command: "newexe", Source: "prog1_arm", Target: "prog1"}},
-						},
-						conditionStmt{
-							Expr: NewNotExpr(UseExpr{Flag: "extended"}),
-							Body: []installStmt{actionStmt{Command: "newexe", Source: "prog2_arm", Target: "prog2"}},
-						},
+						actionStmt{Op: OpDoexe, Source: "app_std"},
 					},
 				},
 			},
-		},
-	}
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 1)
+		cond := reduced.Body[0].(conditionStmt)
+		require.Equal(t, ArchExpr{Arch: "amd64"}, cond.Expr)
+		require.Len(t, cond.Body, 2)
+		require.Equal(t, UseExpr{Flag: "extended"}, cond.Body[0].(conditionStmt).Expr)
+		require.Equal(t, NewNotExpr(UseExpr{Flag: "extended"}), cond.Body[1].(conditionStmt).Expr)
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			plan := &installPlan{
-				UniverseArchitectures: universe,
-				Body:                  tt.input,
-			}
-			reduced := plan.reducePlan()
-			require.Equal(t, tt.expected, reduced.Body)
-		})
-	}
+	t.Run("multi-level recursive factoring", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				conditionStmt{
+					Expr: NewAndExpr(ArchExpr{Arch: "amd64"}, UseExpr{Flag: "gui"}, UseExpr{Flag: "opengl"}),
+					Body: []installStmt{actionStmt{Op: OpDoexe, Source: "app_gui_gl"}},
+				},
+				conditionStmt{
+					Expr: NewAndExpr(ArchExpr{Arch: "amd64"}, UseExpr{Flag: "gui"}, NewNotExpr(UseExpr{Flag: "opengl"})),
+					Body: []installStmt{actionStmt{Op: OpDoexe, Source: "app_gui_sw"}},
+				},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 1)
+		outer := reduced.Body[0].(conditionStmt)
+		require.Equal(t, ArchExpr{Arch: "amd64"}, outer.Expr)
+		require.Len(t, outer.Body, 1)
+		mid := outer.Body[0].(conditionStmt)
+		require.Equal(t, UseExpr{Flag: "gui"}, mid.Expr)
+		require.Len(t, mid.Body, 2)
+	})
 }
 
-func TestReducer_Idempotence(t *testing.T) {
+func TestReducerIdempotenceAndConvergence(t *testing.T) {
 	plan := &installPlan{
-		UniverseArchitectures: []string{"amd64", "arm64", "riscv"},
+		UniverseArchitectures: []string{"amd64", "arm64", "riscv64"},
 		Body: []installStmt{
-			stateStmt{Command: "exeinto", Value: "/opt/bin"},
+			stateStmt{Family: StateFamilyExe, Value: "/usr/bin"},
 			conditionStmt{
 				Expr: NewAndExpr(ArchExpr{Arch: "amd64"}, UseExpr{Flag: "extended"}),
-				Body: []installStmt{actionStmt{Command: "newexe", Source: "p1_x86", Target: "p1"}},
+				Body: []installStmt{actionStmt{Op: OpDoexe, Source: "prog_amd64_ext"}},
 			},
 			conditionStmt{
 				Expr: NewAndExpr(ArchExpr{Arch: "amd64"}, NewNotExpr(UseExpr{Flag: "extended"})),
-				Body: []installStmt{actionStmt{Command: "newexe", Source: "p2_x86", Target: "p2"}},
+				Body: []installStmt{actionStmt{Op: OpDoexe, Source: "prog_amd64_std"}},
 			},
 			conditionStmt{
-				Expr: NewAndExpr(ArchExpr{Arch: "arm64"}, UseExpr{Flag: "extended"}),
-				Body: []installStmt{actionStmt{Command: "newexe", Source: "p1_arm", Target: "p1"}},
-			},
-			conditionStmt{
-				Expr: NewAndExpr(ArchExpr{Arch: "arm64"}, NewNotExpr(UseExpr{Flag: "extended"})),
-				Body: []installStmt{actionStmt{Command: "newexe", Source: "p2_arm", Target: "p2"}},
+				Expr: ArchExpr{Arch: "arm64"},
+				Body: []installStmt{actionStmt{Op: OpDoexe, Source: "prog_arm64"}},
 			},
 		},
 	}
@@ -392,87 +603,64 @@ func TestReducer_Idempotence(t *testing.T) {
 	once := plan.reducePlan()
 	twice := once.reducePlan()
 
+	require.True(t, planEqual(once, twice))
 	require.Equal(t, once, twice)
 }
 
-func TestReducer_NestedRendering(t *testing.T) {
-	plan := &installPlan{
-		UniverseArchitectures: []string{"amd64", "arm64"},
-		Body: []installStmt{
-			conditionStmt{
-				Expr: NewAndExpr(ArchExpr{Arch: "amd64"}, UseExpr{Flag: "extended"}),
-				Body: []installStmt{actionStmt{Command: "newexe", Source: "prog1_x86", Target: "prog1", Die: "Failed to install binary"}},
-			},
-			conditionStmt{
-				Expr: NewAndExpr(ArchExpr{Arch: "amd64"}, NewNotExpr(UseExpr{Flag: "extended"})),
-				Body: []installStmt{actionStmt{Command: "newexe", Source: "prog2_x86", Target: "prog2", Die: "Failed to install binary"}},
-			},
-			conditionStmt{
-				Expr: NewAndExpr(ArchExpr{Arch: "arm64"}, UseExpr{Flag: "extended"}),
-				Body: []installStmt{actionStmt{Command: "newexe", Source: "prog1_arm", Target: "prog1", Die: "Failed to install binary"}},
-			},
-			conditionStmt{
-				Expr: NewAndExpr(ArchExpr{Arch: "arm64"}, NewNotExpr(UseExpr{Flag: "extended"})),
-				Body: []installStmt{actionStmt{Command: "newexe", Source: "prog2_arm", Target: "prog2", Die: "Failed to install binary"}},
-			},
-		},
-	}
-
-	reduced := plan.reducePlan()
-	output := formatStmts(reduced.Body, "  ")
-
-	expected := `  if use amd64; then
-    if use extended; then
-      newexe "prog1_x86" "prog1" || die "Failed to install binary"
-    fi
-    if ! use extended; then
-      newexe "prog2_x86" "prog2" || die "Failed to install binary"
-    fi
-  fi
-  if use arm64; then
-    if use extended; then
-      newexe "prog1_arm" "prog1" || die "Failed to install binary"
-    fi
-    if ! use extended; then
-      newexe "prog2_arm" "prog2" || die "Failed to install binary"
-    fi
-  fi`
-
-	require.Equal(t, expected, output)
-}
-
-func TestReducer_Validation(t *testing.T) {
+func TestRecursiveValidation(t *testing.T) {
 	t.Run("valid plan", func(t *testing.T) {
 		plan := &installPlan{
 			Body: []installStmt{
-				actionStmt{Command: "dosym", Source: "src", Target: "dst"},
-				conditionStmt{
-					Expr: ArchExpr{Arch: "amd64"},
-					Body: []installStmt{
-						actionStmt{Command: "doexe", Source: "foo"},
-					},
-				},
+				stateStmt{Family: StateFamilyExe, Value: "/usr/bin"},
+				actionStmt{Op: OpDoexe, Source: "app"},
+				actionStmt{Op: OpDosym, Source: "target", Target: "link"},
+				actionStmt{Op: OpNewexe, Source: "app_x86", Target: "app"},
 			},
 		}
 		require.NoError(t, plan.Validate())
 	})
 
-	t.Run("nested invalid dosym", func(t *testing.T) {
+	t.Run("invalid condition without expr", func(t *testing.T) {
 		plan := &installPlan{
 			Body: []installStmt{
 				conditionStmt{
-					Expr: ArchExpr{Arch: "amd64"},
-					Body: []installStmt{
-						conditionStmt{
-							Expr: UseExpr{Flag: "foo"},
-							Body: []installStmt{
-								actionStmt{Command: "dosym", Source: "src", Target: ""},
-							},
-						},
-					},
+					Expr: nil,
+					Body: []installStmt{actionStmt{Op: OpDoexe, Source: "app"}},
 				},
 			},
 		}
+		require.Error(t, plan.Validate())
+	})
+
+	t.Run("invalid dosym without destination", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				actionStmt{Op: OpDosym, Source: "app"},
+			},
+		}
 		require.EqualError(t, plan.Validate(), "dosym requires a destination")
+	})
+
+	t.Run("invalid rename without destination", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				actionStmt{Op: OpNewexe, Source: "app"},
+			},
+		}
+		require.EqualError(t, plan.Validate(), "newexe requires a destination")
+	})
+
+	t.Run("invalid state without family", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				stateStmt{Family: "", Value: "/usr/bin"},
+			},
+		}
+		require.EqualError(t, plan.Validate(), "stateStmt requires a state family")
+	})
+
+	t.Run("nil plan validate is nil", func(t *testing.T) {
+		var plan *installPlan
+		require.NoError(t, plan.Validate())
 	})
 }

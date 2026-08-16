@@ -352,9 +352,6 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		ExtraInstall: extraInstall,
 		Archs:        archInfos,
 		UseFlags:     useFlags,
-		Dodir:        cfg.Dodir,
-		Dodoc:        ef.processStringArray(cfg.Dodoc),
-		Doman:        ef.processStringArray(cfg.Doman),
 		Systemd:      systemd,
 		Eclasses:     eclasses,
 	}
@@ -363,9 +360,8 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		for _, item := range data.Systemd {
 			item.Target = "1"
 			item.Dir = "/usr/lib/systemd/system"
-			item.DirSwitchCmd = "insinto"
-			item.InstallerCmd = "doins"
-			item.InstallRenameCmd = "newins"
+			item.StateFamily = StateFamilyIns
+			item.Section = "doins"
 			installers = append(installers, item)
 		}
 		data.Systemd = nil
@@ -374,124 +370,16 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		data.Systemd = nil
 	}
 
-	// Build install stmts
-	var stmts []installStmt
-	if extraInstall != "" {
-		stmts = append(stmts, rawStmt{Content: extraInstall})
-	}
-
-	if cfg.Bindir != "" && len(installByKw) > 0 {
-		stmts = append(stmts, stateStmt{Command: "exeinto", Value: cfg.Bindir})
-	}
-
-	// Grouping identical installs by architecture
-	if len(installByKw) > 0 {
-		groupMap := make(map[string][]string)
-		installItemsMap := make(map[string][]installData)
-
-		for _, kw := range keywordsList {
-			installs := installByKw[kw]
-			if len(installs) == 0 {
-				continue
-			}
-			var keyParts []string
-			for _, inst := range installs {
-				keyParts = append(keyParts, inst.Source+":"+inst.Target)
-			}
-			groupKey := strings.Join(keyParts, ";")
-			groupMap[groupKey] = append(groupMap[groupKey], kw)
-			installItemsMap[groupKey] = installs
-		}
-
-		groupKeys := make([]string, 0, len(groupMap))
-		for groupKey := range groupMap {
-			groupKeys = append(groupKeys, groupKey)
-		}
-		slices.Sort(groupKeys)
-
-		for _, groupKey := range groupKeys {
-			kws := groupMap[groupKey]
-			slices.Sort(kws)
-			installs := installItemsMap[groupKey]
-
-			var body []installStmt
-			for _, inst := range installs {
-				cmd := "doexe"
-				if inst.Source != inst.Target && !strings.HasSuffix(inst.Source, "/"+inst.Target) {
-					cmd = "newexe"
-				}
-				dieMsg := "Failed to install binary"
-				if cmd == "newexe" {
-					dieMsg = "Failed to install " + inst.Target
-				}
-				target := ""
-				if cmd == "newexe" {
-					target = inst.Target
-				}
-				body = append(body, actionStmt{
-					Command: cmd,
-					Source:  inst.Source,
-					Target:  target,
-					Die:     dieMsg,
-				})
-			}
-
-			stmts = append(stmts, conditionStmt{
-				Expr: newArchsAndUseExpr(kws, nil),
-				Body: body,
-			})
-		}
-	}
-
-	// Explicit installers
-	for _, inst := range installers {
-		var condBody []installStmt
-		if inst.DirSwitchCmd != "" {
-			condBody = append(condBody, stateStmt{Command: inst.DirSwitchCmd, Value: inst.Dir})
-		}
-
-		cmd := inst.InstallerCmd
-		if inst.Source != inst.Base && inst.InstallerCmd != "dosym" {
-			cmd = inst.InstallRenameCmd
-		}
-
-		dieMsg := "Failed to install " + inst.Source
-		target := ""
-		if inst.InstallerCmd == "dosym" {
-			target = inst.Target
-		} else if inst.Source != inst.Base {
-			target = inst.Base
-		}
-
-		condBody = append(condBody, actionStmt{
-			Command: cmd,
-			Source:  inst.Source,
-			Target:  target,
-			Die:     dieMsg,
-		})
-
-		if len(inst.Keywords) > 0 || len(inst.Use) > 0 {
-			stmts = append(stmts, conditionStmt{
-				Expr: newArchsAndUseExpr(inst.Keywords, inst.Use),
-				Body: condBody,
-			})
-		} else {
-			stmts = append(stmts, condBody...)
-		}
-	}
-
-	for _, man := range data.Doman {
-		stmts = append(stmts, actionStmt{Command: "doman", Source: man})
-	}
-	for _, doc := range data.Dodoc {
-		stmts = append(stmts, actionStmt{Command: "dodoc", Source: doc})
-	}
-
-	plan := &installPlan{
-		UniverseArchitectures: keywordsList,
-		Body:                  stmts,
-	}
-	data.Plan = plan.reducePlan()
+	data.Plan = buildInstallPlan(
+		cfg.Bindir,
+		keywordsList,
+		extraInstall,
+		installByKw,
+		installers,
+		cfg.Dodir,
+		ef.processStringArray(cfg.Doman),
+		ef.processStringArray(cfg.Dodoc),
+	).reducePlan()
 	if err := data.Validate(); err != nil {
 		return err
 	}
@@ -1127,5 +1015,152 @@ func (g *publishGroup) updateVersions(ctx *context.Context, dl client.FileDownlo
 				g.files[j].Path = newMetaCachePath
 			}
 		}
+	}
+}
+
+func buildInstallPlan(
+	bindir string,
+	keywordsList []string,
+	extraInstall string,
+	installByKw map[string][]installData,
+	installers []installItemData,
+	dodir []string,
+	doman []string,
+	dodoc []string,
+) *installPlan {
+	var stmts []installStmt
+
+	if extraInstall != "" {
+		stmts = append(stmts, rawStmt{Content: extraInstall})
+	}
+
+	for _, dir := range dodir {
+		stmts = append(stmts, actionStmt{
+			Op:     OpDodir,
+			Source: dir,
+		})
+	}
+
+	if bindir != "" && len(installByKw) > 0 {
+		stmts = append(stmts, stateStmt{
+			Family: StateFamilyExe,
+			Value:  bindir,
+		})
+	}
+
+	if len(installByKw) > 0 {
+		groupMap := make(map[string][]string)
+		installItemsMap := make(map[string][]installData)
+
+		for _, kw := range keywordsList {
+			installs := installByKw[kw]
+			if len(installs) == 0 {
+				continue
+			}
+			var keyParts []string
+			for _, inst := range installs {
+				keyParts = append(keyParts, inst.Source+":"+inst.Target)
+			}
+			groupKey := strings.Join(keyParts, ";")
+			groupMap[groupKey] = append(groupMap[groupKey], kw)
+			installItemsMap[groupKey] = installs
+		}
+
+		groupKeys := make([]string, 0, len(groupMap))
+		for groupKey := range groupMap {
+			groupKeys = append(groupKeys, groupKey)
+		}
+		slices.Sort(groupKeys)
+
+		for _, groupKey := range groupKeys {
+			kws := groupMap[groupKey]
+			slices.Sort(kws)
+			installs := installItemsMap[groupKey]
+
+			var body []installStmt
+			for _, inst := range installs {
+				isRename := inst.Source != inst.Target && !strings.HasSuffix(inst.Source, "/"+inst.Target)
+				op := OpDoexe
+				if isRename {
+					op = OpNewexe
+				}
+				dieMsg := "Failed to install binary"
+				target := ""
+				if isRename {
+					dieMsg = "Failed to install " + inst.Target
+					target = inst.Target
+				}
+				body = append(body, actionStmt{
+					Op:     op,
+					Source: inst.Source,
+					Target: target,
+					Die:    dieMsg,
+				})
+			}
+
+			if len(kws) > 0 {
+				stmts = append(stmts, conditionStmt{
+					Expr: newArchsAndUseExpr(kws, nil),
+					Body: body,
+				})
+			} else {
+				stmts = append(stmts, body...)
+			}
+		}
+	}
+
+	for _, inst := range installers {
+		var condBody []installStmt
+		if inst.StateFamily != StateFamilyNone {
+			condBody = append(condBody, stateStmt{
+				Family: inst.StateFamily,
+				Value:  inst.Dir,
+			})
+		}
+
+		isRename := inst.Source != inst.Base && inst.Section != "dosym"
+		op := resolveInstallOp(inst.Section, isRename)
+
+		dieMsg := "Failed to install " + inst.Source
+		target := ""
+		if inst.Section == "dosym" {
+			target = inst.Target
+		} else if isRename {
+			target = inst.Base
+		}
+
+		condBody = append(condBody, actionStmt{
+			Op:     op,
+			Source: inst.Source,
+			Target: target,
+			Die:    dieMsg,
+		})
+
+		if len(inst.Keywords) > 0 || len(inst.Use) > 0 {
+			stmts = append(stmts, conditionStmt{
+				Expr: newArchsAndUseExpr(inst.Keywords, inst.Use),
+				Body: condBody,
+			})
+		} else {
+			stmts = append(stmts, condBody...)
+		}
+	}
+
+	for _, man := range doman {
+		stmts = append(stmts, actionStmt{
+			Op:     OpDoman,
+			Source: man,
+		})
+	}
+	for _, doc := range dodoc {
+		stmts = append(stmts, actionStmt{
+			Op:     OpDodoc,
+			Source: doc,
+		})
+	}
+
+	return &installPlan{
+		UniverseArchitectures: keywordsList,
+		Body:                  stmts,
 	}
 }
