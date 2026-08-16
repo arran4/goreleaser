@@ -783,61 +783,31 @@ func TestTemplateScenarios(t *testing.T) {
 
 	testCases := []struct {
 		name          string
-		installGroups []installGroup
 		doexe         []installItemData
 	}{
 		{
 			name: "scenario_1",
-			installGroups: []installGroup{
-				{
-					Keywords: []string{"amd64", "arm64"},
-					Installs: []installData{
-						{Source: "prog1", Target: "prog1"},
-						{Source: "prog2", Target: "prog2"},
-					},
-				},
+			doexe: []installItemData{
+				{Source: "prog1", Target: "prog1", Keywords: []string{"amd64", "arm64"}, InstallerCmd: "doexe"},
+				{Source: "prog2", Target: "prog2", Keywords: []string{"amd64", "arm64"}, InstallerCmd: "doexe"},
 			},
 		},
 		{
 			name: "scenario_2",
-			installGroups: []installGroup{
-				{
-					Keywords: []string{"amd64"},
-					Installs: []installData{
-						{Source: "prog1_x86", Target: "prog1"},
-						{Source: "prog2_x86", Target: "prog2"},
-					},
-				},
-				{
-					Keywords: []string{"arm64"},
-					Installs: []installData{
-						{Source: "prog1_arm", Target: "prog1"},
-						{Source: "prog2_arm", Target: "prog2"},
-					},
-				},
+			doexe: []installItemData{
+				{Source: "prog1_x86", Target: "prog1", Keywords: []string{"amd64"}, InstallerCmd: "doexe"},
+				{Source: "prog2_x86", Target: "prog2", Keywords: []string{"amd64"}, InstallerCmd: "doexe"},
+				{Source: "prog1_arm", Target: "prog1", Keywords: []string{"arm64"}, InstallerCmd: "doexe"},
+				{Source: "prog2_arm", Target: "prog2", Keywords: []string{"arm64"}, InstallerCmd: "doexe"},
 			},
 		},
 		{
 			name: "scenario_3",
-			installGroups: []installGroup{
-				{
-					Keywords: []string{"amd64"},
-					Installs: []installData{
-						{Source: "prog1_x86", Target: "prog1"},
-					},
-				},
-				{
-					Installs: []installData{
-						{Source: "prog2", Target: "prog2"},
-					},
-				},
-				{
-					Keywords: []string{"arm64"},
-					Installs: []installData{
-						{Source: "prog1_arm", Target: "prog1"},
-						{Source: "prog3", Target: "prog2"},
-					},
-				},
+			doexe: []installItemData{
+				{Source: "prog1_x86", Target: "prog1", Keywords: []string{"amd64"}, InstallerCmd: "doexe"},
+				{Source: "prog2", Target: "prog2", InstallerCmd: "doexe"},
+				{Source: "prog1_arm", Target: "prog1", Keywords: []string{"arm64"}, InstallerCmd: "doexe"},
+				{Source: "prog3", Target: "prog2", Keywords: []string{"arm64"}, InstallerCmd: "doexe"},
 			},
 		},
 		{
@@ -860,17 +830,52 @@ func TestTemplateScenarios(t *testing.T) {
 				Bindir        string
 				ExtraInstall  string
 				Archs         []any
-				InstallGroups []installGroup
+
 				UseFlags      []config.GentooUseFlag
 				Dodir         []string
 				Dodoc         []string
 				Doman         []string
 				Systemd       []installItemData
 				Eclasses      []string
-				Installers    []installItemData
+				InstallScript string
 			}{
-				InstallGroups: tc.installGroups,
-				Installers:    tc.doexe,
+
+				InstallScript: func() string {
+				    var stmts []installStmt
+				    for _, e := range tc.doexe {
+				        cmd := e.InstallerCmd
+				        if e.Source != e.Base && e.InstallRenameCmd != "" {
+				            cmd = e.InstallRenameCmd
+				        }
+
+				        var body []installStmt
+				        if e.DirSwitchCmd != "" {
+				            body = append(body, stateStmt{Command: e.DirSwitchCmd, Value: e.Dir})
+				        }
+				        target := e.Target
+				        if e.Source != e.Base {
+				            target = e.Base
+				        } else if cmd != "dosym" && e.Target == "" {
+				            target = ""
+				        }
+				        dieMsg := "Failed to install " + e.Source
+				        if cmd == "doexe" && target == "" {
+						dieMsg = "Failed to install binary"
+				        }
+				        if cmd == "newexe" && target != "" {
+						dieMsg = "Failed to install binary"
+				        }
+				        body = append(body, actionStmt{Command: cmd, Source: e.Source, Target: target, Die: dieMsg})
+
+				        if len(e.Keywords) > 0 {
+				            stmts = append(stmts, conditionStmt{Architectures: e.Keywords, Body: body})
+				        } else {
+				            stmts = append(stmts, body...)
+				        }
+				    }
+				    plan := installPlan{Body: stmts}
+				    return formatStmts(plan.Body, "")
+				}(),
 				Bindir:        "/usr/bin",
 				UseFlags:      gentooUseFlags(config.Gentoo{}),
 			}
@@ -1692,7 +1697,7 @@ func TestEbuildData(t *testing.T) {
 		data := ebuildData{
 			Description: "foo",
 			License:     "MIT",
-			Installers:  []installItemData{{InstallerCmd: "dosym", Source: "foo"}},
+			Plan: installPlan{Body: []installStmt{actionStmt{Command: "dosym", Source: "foo"}}},
 		}
 		require.EqualError(t, data.Validate(), "dosym requires a destination")
 	})
@@ -1701,7 +1706,7 @@ func TestEbuildData(t *testing.T) {
 		data := ebuildData{
 			Description: "foo",
 			License:     "MIT",
-			Installers:  []installItemData{{InstallerCmd: "dosym", Source: "foo", Target: "bar"}},
+			Plan: installPlan{Body: []installStmt{actionStmt{Command: "dosym", Source: "foo", Target: "bar"}}},
 		}
 		require.NoError(t, data.Validate())
 	})
@@ -2452,8 +2457,8 @@ func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
 		require.NoError(t, err)
 		str := string(content)
 
-		require.Contains(t, str, "if use amd64; then\n    exeinto /opt/bin\n    doexe \"dir_amd64/myapp\" || die \"Failed to install dir_amd64/myapp\"\n  fi")
-		require.Contains(t, str, "if use arm64; then\n    exeinto /opt/bin\n    doexe \"dir_arm64/myapp\" || die \"Failed to install dir_arm64/myapp\"\n  fi")
+		require.Contains(t, str, "if use amd64; then\n  exeinto /opt/bin\n  newexe \"dir_amd64/myapp\" \"myapp\" || die \"Failed to install dir_amd64/myapp\"\nfi")
+		require.Contains(t, str, "if use arm64; then\n  exeinto /opt/bin\n  newexe \"dir_arm64/myapp\" \"myapp\" || die \"Failed to install dir_arm64/myapp\"\nfi")
 	})
 
 	t.Run("plain src stays literal even with wrappedIn archive", func(t *testing.T) {
@@ -2493,7 +2498,7 @@ func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
 		require.NoError(t, err)
 		str := string(content)
 
-		require.Contains(t, str, `doexe "special/foo"`)
+		require.Contains(t, str, `newexe "special/foo" "foo"`)
 		require.NotContains(t, str, `doexe "myapp-1.0.0/special/foo"`)
 	})
 }
@@ -3009,9 +3014,9 @@ func TestGentooArchSuppressionPrecedence(t *testing.T) {
 		str := string(content)
 
 		// Fallback binary 'doexe "myapp"' is generated ONLY for arm
-		require.Contains(t, str, "if use arm; then\n    doexe \"myapp\" || die \"Failed to install binary\"\n  fi")
-		require.Contains(t, str, "if use amd64; then\n    exeinto /opt/bin\n    newexe \"myapp\" \"foo-amd64\" || die \"Failed to install myapp\"\n  fi")
-		require.Contains(t, str, "if use arm64; then\n    exeinto /opt/bin\n    newexe \"myapp\" \"foo-arm64\" || die \"Failed to install myapp\"\n  fi")
+		require.Contains(t, str, "if use arm; then\n  doexe \"myapp\" || die \"Failed to install binary\"\nfi")
+		require.Contains(t, str, "if use amd64; then\n  newexe \"myapp\" \"foo-amd64\" || die \"Failed to install myapp\"\nfi")
+		require.Contains(t, str, "if use arm64; then\n  newexe \"myapp\" \"foo-arm64\" || die \"Failed to install myapp\"\nfi")
 	})
 
 	t.Run("arch-specific entry followed by global entry suppresses fallback on all architectures", func(t *testing.T) {

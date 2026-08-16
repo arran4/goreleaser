@@ -16,6 +16,6 @@ IUSE=""
 S="${WORKDIR}"
 
 src_install() {
-  exeinto /opt/bin
-  doexe "foo" || die "Failed to install binary"
+exeinto /opt/bin
+doexe "foo" || die "Failed to install binary"
 }

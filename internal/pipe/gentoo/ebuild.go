@@ -27,12 +27,6 @@ var ebuildTemplate string
 //go:embed templates/md5-cache.tmpl
 var metaCacheTemplate string
 
-type installData struct {
-	Source   string
-	Target   string
-	Keywords []string
-}
-
 type archItem struct {
 	File string
 	URI  string
@@ -41,11 +35,6 @@ type archItem struct {
 type archData struct {
 	Keyword string
 	URIs    []archItem
-}
-
-type installGroup struct {
-	Keywords []string
-	Installs []installData
 }
 
 type installItemData struct {
@@ -69,14 +58,13 @@ type ebuildData struct {
 	Bindir        string
 	ExtraInstall  string
 	Archs         []archData
-	InstallGroups []installGroup
 	UseFlags      []config.GentooUseFlag
 	Dodir         []string
 	Dodoc         []string
 	Doman         []string
 	Systemd       []installItemData
 	Eclasses      []string
-	Installers    []installItemData
+	Plan          installPlan
 }
 
 func (d ebuildData) Validate() error {
@@ -86,12 +74,11 @@ func (d ebuildData) Validate() error {
 	if strings.TrimSpace(d.License) == "" {
 		return errors.New("gentoo license is required and cannot be empty")
 	}
-	for _, sym := range d.Installers {
-		if sym.InstallerCmd != "dosym" {
-			continue
-		}
-		if sym.Target == "" {
-			return errors.New("dosym requires a destination")
+	for _, stmt := range d.Plan.Body {
+		if a, ok := stmt.(actionStmt); ok {
+			if a.Command == "dosym" && a.Target == "" {
+				return errors.New("dosym requires a destination")
+			}
 		}
 	}
 	return nil
@@ -107,6 +94,11 @@ func shellEscape(s string) string {
 	s = strings.ReplaceAll(s, `$`, `\$`)
 	s = strings.ReplaceAll(s, "`", "\\`")
 	return s
+}
+
+func (d ebuildData) InstallScript() string {
+	reduced := reducePlan(d.Plan)
+	return formatStmts(reduced.Body, "")
 }
 
 func (d ebuildData) RenderEbuild() (string, error) {

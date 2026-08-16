@@ -15,11 +15,11 @@ IUSE=""
 S="${WORKDIR}"
 
 src_install() {
-  exeinto /opt/bin
-  doexe "foo" || die "Failed to install binary"
-  insinto /etc/foo
-  newins "config.yaml" "foo.conf" || die "Failed to install config.yaml"
-  insinto /
-  doins "simple.yaml" || die "Failed to install simple.yaml"
+exeinto /opt/bin
+doexe "foo" || die "Failed to install binary"
+insinto /etc/foo
+newins "config.yaml" "foo.conf" || die "Failed to install config.yaml"
+insinto /
+doins "simple.yaml" || die "Failed to install simple.yaml"
   doman "foo.1"
 }

@@ -14,9 +14,10 @@ IUSE=""
 S="${WORKDIR}"
 
 src_install() {
-  exeinto /usr/bin
-  if use amd64 || use arm64; then
-    doexe "prog1" || die "Failed to install binary"
-    doexe "prog2" || die "Failed to install binary"
-  fi
+if use amd64 || use arm64; then
+  doexe "prog1" || die "Failed to install binary"
+fi
+if use amd64 || use arm64; then
+  doexe "prog2" || die "Failed to install binary"
+fi
 }
