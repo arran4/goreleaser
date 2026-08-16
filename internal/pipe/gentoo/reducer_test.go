@@ -17,7 +17,7 @@ func TestReducer(t *testing.T) {
 			name: "universal architecture condition -> removed",
 			input: []installStmt{
 				conditionStmt{
-					Architectures: []string{"amd64", "arm64"},
+					Expr: newArchsAndUseExpr([]string{"amd64", "arm64"}, nil),
 					Body: []installStmt{
 						actionStmt{Command: "doexe", Source: "foo"},
 					},
@@ -31,7 +31,7 @@ func TestReducer(t *testing.T) {
 			name: "partial architecture condition -> retained",
 			input: []installStmt{
 				conditionStmt{
-					Architectures: []string{"amd64"},
+					Expr: newArchsAndUseExpr([]string{"amd64"}, nil),
 					Body: []installStmt{
 						actionStmt{Command: "doexe", Source: "foo"},
 					},
@@ -39,7 +39,7 @@ func TestReducer(t *testing.T) {
 			},
 			expected: []installStmt{
 				conditionStmt{
-					Architectures: []string{"amd64"},
+					Expr: newArchsAndUseExpr([]string{"amd64"}, nil),
 					Body: []installStmt{
 						actionStmt{Command: "doexe", Source: "foo"},
 					},
@@ -63,7 +63,7 @@ func TestReducer(t *testing.T) {
 			input: []installStmt{
 				stateStmt{Command: "exeinto", Value: "/opt/bin"},
 				conditionStmt{
-					Architectures: []string{"amd64"},
+					Expr: newArchsAndUseExpr([]string{"amd64"}, nil),
 					Body: []installStmt{
 						actionStmt{Command: "doexe", Source: "foo"},
 					},
@@ -74,7 +74,7 @@ func TestReducer(t *testing.T) {
 			expected: []installStmt{
 				stateStmt{Command: "exeinto", Value: "/opt/bin"},
 				conditionStmt{
-					Architectures: []string{"amd64"},
+					Expr: newArchsAndUseExpr([]string{"amd64"}, nil),
 					Body: []installStmt{
 						actionStmt{Command: "doexe", Source: "foo"},
 					},
@@ -87,7 +87,7 @@ func TestReducer(t *testing.T) {
 			input: []installStmt{
 				stateStmt{Command: "exeinto", Value: "/opt/bin"},
 				conditionStmt{
-					Architectures: []string{"amd64"},
+					Expr: newArchsAndUseExpr([]string{"amd64"}, nil),
 					Body: []installStmt{
 						stateStmt{Command: "exeinto", Value: "/usr/bin"},
 						actionStmt{Command: "doexe", Source: "foo"},
@@ -99,7 +99,7 @@ func TestReducer(t *testing.T) {
 			expected: []installStmt{
 				stateStmt{Command: "exeinto", Value: "/opt/bin"},
 				conditionStmt{
-					Architectures: []string{"amd64"},
+					Expr: newArchsAndUseExpr([]string{"amd64"}, nil),
 					Body: []installStmt{
 						stateStmt{Command: "exeinto", Value: "/usr/bin"},
 						actionStmt{Command: "doexe", Source: "foo"},
@@ -117,7 +117,7 @@ func TestReducer(t *testing.T) {
 				UniverseArchitectures: universe,
 				Body:                  tt.input,
 			}
-			reduced := reducePlan(plan)
+			reduced := reducePlan(&plan)
 			if !reflect.DeepEqual(reduced.Body, tt.expected) {
 				t.Errorf("expected %v, got %v", tt.expected, reduced.Body)
 			}

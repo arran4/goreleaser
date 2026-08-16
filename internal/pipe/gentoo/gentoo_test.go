@@ -868,7 +868,7 @@ func TestTemplateScenarios(t *testing.T) {
 				        body = append(body, actionStmt{Command: cmd, Source: e.Source, Target: target, Die: dieMsg})
 
 				        if len(e.Keywords) > 0 {
-				            stmts = append(stmts, conditionStmt{Architectures: e.Keywords, Body: body})
+				            stmts = append(stmts, conditionStmt{Expr: newArchsAndUseExpr(e.Keywords, nil), Body: body})
 				        } else {
 				            stmts = append(stmts, body...)
 				        }

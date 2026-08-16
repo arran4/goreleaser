@@ -437,8 +437,8 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 			}
 
 			stmts = append(stmts, conditionStmt{
-				Architectures: kws,
-				Body:          body,
+				Expr: newArchsAndUseExpr(kws, nil),
+				Body: body,
 			})
 		}
 	}
@@ -472,9 +472,8 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 
 		if len(inst.Keywords) > 0 || len(inst.Use) > 0 {
 			stmts = append(stmts, conditionStmt{
-				Architectures: inst.Keywords,
-				Use:           inst.Use,
-				Body:          condBody,
+				Expr: newArchsAndUseExpr(inst.Keywords, inst.Use),
+				Body: condBody,
 			})
 		} else {
 			stmts = append(stmts, condBody...)
@@ -485,8 +484,8 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		UniverseArchitectures: keywordsList,
 		Body:                  stmts,
 	}
-	reducedPlan := reducePlan(plan)
-	data.Plan = &reducedPlan
+	reducedPlan := reducePlan(&plan)
+	data.Plan = reducedPlan
 	if err := data.Validate(); err != nil {
 		return err
 	}
