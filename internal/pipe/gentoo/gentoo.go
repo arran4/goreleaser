@@ -484,8 +484,7 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		UniverseArchitectures: keywordsList,
 		Body:                  stmts,
 	}
-	reducedPlan := reducePlan(&plan)
-	data.Plan = reducedPlan
+	data.Plan = plan.reducePlan()
 	if err := data.Validate(); err != nil {
 		return err
 	}

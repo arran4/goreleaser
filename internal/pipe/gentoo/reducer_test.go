@@ -117,7 +117,7 @@ func TestReducer(t *testing.T) {
 				UniverseArchitectures: universe,
 				Body:                  tt.input,
 			}
-			reduced := reducePlan(&plan)
+			reduced := plan.reducePlan()
 			if !reflect.DeepEqual(reduced.Body, tt.expected) {
 				t.Errorf("expected %v, got %v", tt.expected, reduced.Body)
 			}
