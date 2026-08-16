@@ -1,6 +1,7 @@
 package gentoo
 
 import (
+	"maps"
 	"slices"
 	"strings"
 )
@@ -76,15 +77,11 @@ func reduceStmts(stmts []installStmt, universe []string, state map[string]string
 
 			// Rule 3: Propagate state
 			stateBefore := make(map[string]string)
-			for k, v := range state {
-				stateBefore[k] = v
-			}
+			maps.Copy(stateBefore, state)
 
 			// We need to determine if state is divergent after the conditional
 			branchState := make(map[string]string)
-			for k, v := range stateBefore {
-				branchState[k] = v
-			}
+			maps.Copy(branchState, stateBefore)
 
 			reducedBody := reduceStmts(s.Body, universe, branchState)
 			if len(reducedBody) == 0 {
@@ -119,21 +116,21 @@ func reduceStmts(stmts []installStmt, universe []string, state map[string]string
 	for i := 0; i < len(reduced); i++ {
 		s1 := reduced[i]
 		if c1, ok := s1.(conditionStmt); ok {
-		    for j := i + 1; j < len(reduced); j++ {
-		        if c2, ok := reduced[j].(conditionStmt); ok && slices.Equal(c1.Architectures, c2.Architectures) && slices.Equal(c1.Use, c2.Use) {
+			for j := i + 1; j < len(reduced); j++ {
+				if c2, ok := reduced[j].(conditionStmt); ok && slices.Equal(c1.Architectures, c2.Architectures) && slices.Equal(c1.Use, c2.Use) {
 					c1.Body = append(c1.Body, c2.Body...)
 					reduced[i] = c1
 					reduced[j] = rawStmt{Content: ""} // Mark for deletion
 				} else {
-				    break // Can only merge contiguous
+					break // Can only merge contiguous
 				}
-		    }
-		    merged = append(merged, reduced[i])
+			}
+			merged = append(merged, reduced[i])
 		} else {
-		    if r, ok := s1.(rawStmt); ok && r.Content == "" {
-		        continue
-		    }
-		    merged = append(merged, s1)
+			if r, ok := s1.(rawStmt); ok && r.Content == "" {
+				continue
+			}
+			merged = append(merged, s1)
 		}
 	}
 
@@ -141,7 +138,7 @@ func reduceStmts(stmts []installStmt, universe []string, state map[string]string
 }
 
 func formatStmts(stmts []installStmt, indent string) string {
-	return strings.TrimSpace(formatStmtsInternal(stmts, indent))
+	return strings.TrimRight(formatStmtsInternal(stmts, indent), "\n")
 }
 
 func formatStmtsInternal(stmts []installStmt, indent string) string {
@@ -158,8 +155,8 @@ func formatStmtsInternal(stmts []installStmt, indent string) string {
 				conds = append(conds, strings.Join(use, " || "))
 			}
 			for _, u := range s.Use {
-				if strings.HasPrefix(u, "!") {
-					conds = append(conds, "! use "+strings.TrimPrefix(u, "!"))
+				if rest, ok := strings.CutPrefix(u, "!"); ok {
+					conds = append(conds, "! use "+rest)
 				} else {
 					conds = append(conds, "use "+u)
 				}

@@ -30,7 +30,7 @@ S="${WORKDIR}"
 
 src_install() {
 {{- if .InstallScript }}
-{{ .InstallScript -}}
+{{ .InstallScript }}
 {{- end }}
 {{- range .Doman }}
   doman "{{ . }}"

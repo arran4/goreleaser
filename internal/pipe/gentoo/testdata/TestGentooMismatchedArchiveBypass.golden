@@ -16,6 +16,6 @@ IUSE=""
 S="${WORKDIR}"
 
 src_install() {
-insinto /etc/myapp
-doins "config.yaml" || die "Failed to install config.yaml"
+  insinto /etc/myapp
+  doins "config.yaml" || die "Failed to install config.yaml"
 }

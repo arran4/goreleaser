@@ -874,7 +874,7 @@ func TestTemplateScenarios(t *testing.T) {
 				        }
 				    }
 				    plan := installPlan{Body: stmts}
-				    return formatStmts(plan.Body, "")
+				    return formatStmts(plan.Body, "  ")
 				}(),
 				Bindir:        "/usr/bin",
 				UseFlags:      gentooUseFlags(config.Gentoo{}),
@@ -1697,7 +1697,7 @@ func TestEbuildData(t *testing.T) {
 		data := ebuildData{
 			Description: "foo",
 			License:     "MIT",
-			Plan: installPlan{Body: []installStmt{actionStmt{Command: "dosym", Source: "foo"}}},
+			Plan: &installPlan{Body: []installStmt{actionStmt{Command: "dosym", Source: "foo"}}},
 		}
 		require.EqualError(t, data.Validate(), "dosym requires a destination")
 	})
@@ -1706,7 +1706,7 @@ func TestEbuildData(t *testing.T) {
 		data := ebuildData{
 			Description: "foo",
 			License:     "MIT",
-			Plan: installPlan{Body: []installStmt{actionStmt{Command: "dosym", Source: "foo", Target: "bar"}}},
+			Plan: &installPlan{Body: []installStmt{actionStmt{Command: "dosym", Source: "foo", Target: "bar"}}},
 		}
 		require.NoError(t, data.Validate())
 	})
@@ -2457,8 +2457,8 @@ func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
 		require.NoError(t, err)
 		str := string(content)
 
-		require.Contains(t, str, "if use amd64; then\n  exeinto /opt/bin\n  newexe \"dir_amd64/myapp\" \"myapp\" || die \"Failed to install dir_amd64/myapp\"\nfi")
-		require.Contains(t, str, "if use arm64; then\n  exeinto /opt/bin\n  newexe \"dir_arm64/myapp\" \"myapp\" || die \"Failed to install dir_arm64/myapp\"\nfi")
+		require.Contains(t, str, "if use amd64; then\n    exeinto /opt/bin\n    newexe \"dir_amd64/myapp\" \"myapp\" || die \"Failed to install dir_amd64/myapp\"\n  fi")
+		require.Contains(t, str, "if use arm64; then\n    exeinto /opt/bin\n    newexe \"dir_arm64/myapp\" \"myapp\" || die \"Failed to install dir_arm64/myapp\"\n  fi")
 	})
 
 	t.Run("plain src stays literal even with wrappedIn archive", func(t *testing.T) {
@@ -3014,9 +3014,9 @@ func TestGentooArchSuppressionPrecedence(t *testing.T) {
 		str := string(content)
 
 		// Fallback binary 'doexe "myapp"' is generated ONLY for arm
-		require.Contains(t, str, "if use arm; then\n  doexe \"myapp\" || die \"Failed to install binary\"\nfi")
-		require.Contains(t, str, "if use amd64; then\n  newexe \"myapp\" \"foo-amd64\" || die \"Failed to install myapp\"\nfi")
-		require.Contains(t, str, "if use arm64; then\n  newexe \"myapp\" \"foo-arm64\" || die \"Failed to install myapp\"\nfi")
+		require.Contains(t, str, "if use arm; then\n    doexe \"myapp\" || die \"Failed to install binary\"\n  fi")
+		require.Contains(t, str, "if use amd64; then\n    newexe \"myapp\" \"foo-amd64\" || die \"Failed to install myapp\"\n  fi")
+		require.Contains(t, str, "if use arm64; then\n    newexe \"myapp\" \"foo-arm64\" || die \"Failed to install myapp\"\n  fi")
 	})
 
 	t.Run("arch-specific entry followed by global entry suppresses fallback on all architectures", func(t *testing.T) {

@@ -17,14 +17,14 @@ IUSE=""
 S="${WORKDIR}"
 
 src_install() {
-exeinto /opt/bin
-if use arm; then
-  doexe "myapp" || die "Failed to install binary"
-fi
-if use amd64; then
-  newexe "myapp" "foo-amd64" || die "Failed to install myapp"
-fi
-if use arm64; then
-  newexe "myapp" "foo-arm64" || die "Failed to install myapp"
-fi
+  exeinto /opt/bin
+  if use arm; then
+    doexe "myapp" || die "Failed to install binary"
+  fi
+  if use amd64; then
+    newexe "myapp" "foo-amd64" || die "Failed to install myapp"
+  fi
+  if use arm64; then
+    newexe "myapp" "foo-arm64" || die "Failed to install myapp"
+  fi
 }

@@ -343,20 +343,20 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		}
 	}
 	data := ebuildData{
-		Name:          cfg.Name,
-		Description:   cfg.Description,
-		Homepage:      cfg.Homepage,
-		License:       cfg.License,
-		Keywords:      strings.Join(keywords, " "),
-		Bindir:        cfg.Bindir,
-		ExtraInstall:  extraInstall,
-		Archs:         archInfos,
-		UseFlags:      useFlags,
-		Dodir:         cfg.Dodir,
-		Dodoc:         ef.processStringArray(cfg.Dodoc),
-		Doman:         ef.processStringArray(cfg.Doman),
-		Systemd:       systemd,
-		Eclasses:      eclasses,
+		Name:         cfg.Name,
+		Description:  cfg.Description,
+		Homepage:     cfg.Homepage,
+		License:      cfg.License,
+		Keywords:     strings.Join(keywords, " "),
+		Bindir:       cfg.Bindir,
+		ExtraInstall: extraInstall,
+		Archs:        archInfos,
+		UseFlags:     useFlags,
+		Dodir:        cfg.Dodir,
+		Dodoc:        ef.processStringArray(cfg.Dodoc),
+		Doman:        ef.processStringArray(cfg.Doman),
+		Systemd:      systemd,
+		Eclasses:     eclasses,
 	}
 
 	if !slices.Contains(eclasses, "systemd") && len(data.Systemd) > 0 {
@@ -485,8 +485,8 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		UniverseArchitectures: keywordsList,
 		Body:                  stmts,
 	}
-	plan = reducePlan(plan)
-	data.Plan = plan
+	reducedPlan := reducePlan(plan)
+	data.Plan = &reducedPlan
 	if err := data.Validate(); err != nil {
 		return err
 	}

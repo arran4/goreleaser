@@ -50,21 +50,21 @@ type installItemData struct {
 }
 
 type ebuildData struct {
-	Name          string
-	Description   string
-	Homepage      string
-	License       string
-	Keywords      string
-	Bindir        string
-	ExtraInstall  string
-	Archs         []archData
-	UseFlags      []config.GentooUseFlag
-	Dodir         []string
-	Dodoc         []string
-	Doman         []string
-	Systemd       []installItemData
-	Eclasses      []string
-	Plan          installPlan
+	Name         string
+	Description  string
+	Homepage     string
+	License      string
+	Keywords     string
+	Bindir       string
+	ExtraInstall string
+	Archs        []archData
+	UseFlags     []config.GentooUseFlag
+	Dodir        []string
+	Dodoc        []string
+	Doman        []string
+	Systemd      []installItemData
+	Eclasses     []string
+	Plan         *installPlan
 }
 
 func (d ebuildData) Validate() error {
@@ -74,10 +74,12 @@ func (d ebuildData) Validate() error {
 	if strings.TrimSpace(d.License) == "" {
 		return errors.New("gentoo license is required and cannot be empty")
 	}
-	for _, stmt := range d.Plan.Body {
-		if a, ok := stmt.(actionStmt); ok {
-			if a.Command == "dosym" && a.Target == "" {
-				return errors.New("dosym requires a destination")
+	if d.Plan != nil {
+		for _, stmt := range d.Plan.Body {
+			if a, ok := stmt.(actionStmt); ok {
+				if a.Command == "dosym" && a.Target == "" {
+					return errors.New("dosym requires a destination")
+				}
 			}
 		}
 	}
@@ -97,8 +99,10 @@ func shellEscape(s string) string {
 }
 
 func (d ebuildData) InstallScript() string {
-	reduced := reducePlan(d.Plan)
-	return formatStmts(reduced.Body, "")
+	if d.Plan == nil {
+		return ""
+	}
+	return formatStmts(d.Plan.Body, "  ")
 }
 
 func (d ebuildData) RenderEbuild() (string, error) {
