@@ -38,14 +38,14 @@ type gentooMaintainer struct {
 	Name  string `xml:"name,omitempty"`
 }
 
-type gentooRemoteId struct {
+type gentooRemoteID struct {
 	Type  string `xml:"type,attr"`
 	Value string `xml:",chardata"`
 }
 
 type gentooUpstream struct {
 	BugsTo   string            `xml:"bugs-to,omitempty"`
-	RemoteId []gentooRemoteId  `xml:"remote-id,omitempty"`
+	RemoteID []gentooRemoteID  `xml:"remote-id,omitempty"`
 	Doc      string            `xml:"doc,omitempty"`
 	Attrs    []xml.Attr        `xml:",any,attr"`
 	Nodes    []gentooInnerNode `xml:",any"`
@@ -152,22 +152,29 @@ func (m *gentooMetadata) SetUpstream(ctx *context.Context, cfg config.Gentoo) {
 	if cfg.Upstream.Doc != "" {
 		m.Upstream.Doc = cfg.Upstream.Doc
 	}
+
+	addRemoteID := func(t, v string) {
+		for _, rid := range m.Upstream.RemoteID {
+			if rid.Type == t && rid.Value == v {
+				return
+			}
+		}
+		m.Upstream.RemoteID = append(m.Upstream.RemoteID, gentooRemoteID{Type: t, Value: v})
+	}
+
 	for _, rid := range cfg.Upstream.RemoteIDs {
-		m.Upstream.RemoteId = append(m.Upstream.RemoteId, gentooRemoteId{
-			Type:  rid.Type,
-			Value: rid.ID,
-		})
+		addRemoteID(rid.Type, rid.ID)
 	}
 
 	if len(cfg.Upstream.RemoteIDs) == 0 {
 		if rep := ctx.Config.Release.GitHub.String(); rep != "" {
-			m.Upstream.RemoteId = append(m.Upstream.RemoteId, gentooRemoteId{Type: "github", Value: rep})
+			addRemoteID("github", rep)
 		}
 		if rep := ctx.Config.Release.GitLab.String(); rep != "" {
-			m.Upstream.RemoteId = append(m.Upstream.RemoteId, gentooRemoteId{Type: "gitlab", Value: rep})
+			addRemoteID("gitlab", rep)
 		}
 		if rep := ctx.Config.Release.Gitea.String(); rep != "" {
-			m.Upstream.RemoteId = append(m.Upstream.RemoteId, gentooRemoteId{Type: "gitea", Value: rep})
+			addRemoteID("gitea", rep)
 		}
 	}
 }
