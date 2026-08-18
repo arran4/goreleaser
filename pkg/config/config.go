@@ -500,6 +500,8 @@ type Gentoo struct {
 	ExtraInstall             string                   `yaml:"extra_install,omitempty" json:"extra_install,omitempty"`
 	Maintainers              []GentooMaintainer       `yaml:"maintainers,omitempty" json:"maintainers,omitempty"`
 	BugsTo                   string                   `yaml:"bugs_to,omitempty" json:"bugs_to,omitempty"`
+	LongDescription          string                   `yaml:"long_description,omitempty" json:"long_description,omitempty"`
+	Upstream                 GentooUpstream           `yaml:"upstream,omitempty" json:"upstream,omitempty"`
 	UseFlags                 []GentooUseFlag          `yaml:"useflags,omitempty" json:"useflags,omitempty"`
 	Dobin                    []GentooInstallItem      `yaml:"dobin,omitempty" json:"dobin,omitempty"`
 	Doconfd                  []GentooInstallItem      `yaml:"doconfd,omitempty" json:"doconfd,omitempty"`
@@ -531,6 +533,7 @@ type GentooInstallItem struct {
 }
 
 type GentooMaintainer struct {
+	Type  string `yaml:"type,omitempty" json:"type,omitempty"`
 	Name  string `yaml:"name,omitempty" json:"name,omitempty"`
 	Email string `yaml:"email,omitempty" json:"email,omitempty"`
 }
@@ -1789,3 +1792,14 @@ const (
 	VersionRetentionStrategyKeepLatest      VersionRetentionStrategy = "keep_latest"
 	VersionRetentionStrategyKeepPrereleases VersionRetentionStrategy = "keep_prereleases"
 )
+
+type GentooUpstream struct {
+	RemoteIDs []GentooUpstreamRemoteID `yaml:"remote_ids,omitempty" json:"remote_ids,omitempty"`
+	BugsTo    string                   `yaml:"bugs_to,omitempty" json:"bugs_to,omitempty"`
+	Doc       string                   `yaml:"doc,omitempty" json:"doc,omitempty"`
+}
+
+type GentooUpstreamRemoteID struct {
+	Type string `yaml:"type,omitempty" json:"type,omitempty"`
+	ID   string `yaml:"id,omitempty" json:"id,omitempty"`
+}

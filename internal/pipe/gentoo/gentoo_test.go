@@ -1601,7 +1601,7 @@ func TestMetaCache(t *testing.T) {
 		repoClient := mockFileDownloader{
 			content: []byte("cache-formats = pms\n"),
 		}
-		settings, err := loadOverlaySettings(testctx.Wrap(t.Context()), config.Gentoo{
+		settings, err := loadOverlaySettings(testctx.WrapWithCfg(t.Context(), config.Project{}), config.Gentoo{
 			MetaCache: true,
 		}, repoClient, client.Repo{})
 		require.NoError(t, err)
@@ -1830,7 +1830,7 @@ func TestGentooMetadata(t *testing.T) {
 		meta.AddUseFlags([]config.GentooUseFlag{
 			{Flag: "systemd", Description: "Enable systemd"},
 		})
-		meta.SetUpstream("https://bugs.example.com")
+		meta.SetUpstream(testctx.WrapWithCfg(t.Context(), config.Project{}), config.Gentoo{BugsTo: "https://bugs.example.com"})
 
 		content, err := meta.Marshal()
 		require.NoError(t, err)

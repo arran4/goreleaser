@@ -2,6 +2,7 @@ package gentoo
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/xml"
@@ -37,11 +38,17 @@ type gentooMaintainer struct {
 	Name  string `xml:"name,omitempty"`
 }
 
+type gentooRemoteId struct {
+	Type  string `xml:"type,attr"`
+	Value string `xml:",chardata"`
+}
+
 type gentooUpstream struct {
-	BugsTo string            `xml:"bugs-to,omitempty"`
-	Doc    string            `xml:"doc,omitempty"`
-	Attrs  []xml.Attr        `xml:",any,attr"`
-	Nodes  []gentooInnerNode `xml:",any"`
+	BugsTo   string            `xml:"bugs-to,omitempty"`
+	RemoteId []gentooRemoteId  `xml:"remote-id,omitempty"`
+	Doc      string            `xml:"doc,omitempty"`
+	Attrs    []xml.Attr        `xml:",any,attr"`
+	Nodes    []gentooInnerNode `xml:",any"`
 }
 
 type gentooUseFlag struct {
@@ -59,12 +66,13 @@ type gentooUse struct {
 }
 
 type gentooMetadata struct {
-	XMLName     xml.Name           `xml:"pkgmetadata"`
-	Attrs       []xml.Attr         `xml:",any,attr"`
-	Maintainers []gentooMaintainer `xml:"maintainer"`
-	Use         *gentooUse         `xml:"use,omitempty"`
-	Upstream    *gentooUpstream    `xml:"upstream,omitempty"`
-	InnerNodes  []gentooInnerNode  `xml:",any"`
+	XMLName         xml.Name           `xml:"pkgmetadata"`
+	LongDescription *gentooInnerNode   `xml:"longdescription,omitempty"`
+	Attrs           []xml.Attr         `xml:",any,attr"`
+	Maintainers     []gentooMaintainer `xml:"maintainer"`
+	Use             *gentooUse         `xml:"use,omitempty"`
+	Upstream        *gentooUpstream    `xml:"upstream,omitempty"`
+	InnerNodes      []gentooInnerNode  `xml:",any"`
 }
 
 func (m *gentooMetadata) AddMaintainers(maintainers []config.GentooMaintainer) error {
@@ -81,7 +89,7 @@ func (m *gentooMetadata) AddMaintainers(maintainers []config.GentooMaintainer) e
 		}
 		if !exists {
 			m.Maintainers = append(m.Maintainers, gentooMaintainer{
-				Type:  "person",
+				Type:  cmp.Or(main.Type, "person"),
 				Email: main.Email,
 				Name:  main.Name,
 			})
@@ -129,14 +137,39 @@ func (m *gentooMetadata) AddUseFlags(flags []config.GentooUseFlag) {
 	}
 }
 
-func (m *gentooMetadata) SetUpstream(bugsTo string) {
-	if bugsTo == "" {
+func (m *gentooMetadata) SetUpstream(ctx *context.Context, cfg config.Gentoo) {
+	if cfg.BugsTo == "" && cfg.Upstream.BugsTo == "" && cfg.Upstream.Doc == "" && len(cfg.Upstream.RemoteIDs) == 0 && ctx.Config.Release.GitHub.String() == "" && ctx.Config.Release.GitLab.String() == "" && ctx.Config.Release.Gitea.String() == "" {
 		return
 	}
 	if m.Upstream == nil {
 		m.Upstream = &gentooUpstream{}
 	}
-	m.Upstream.BugsTo = bugsTo
+	if cfg.BugsTo != "" {
+		m.Upstream.BugsTo = cfg.BugsTo
+	} else if cfg.Upstream.BugsTo != "" {
+		m.Upstream.BugsTo = cfg.Upstream.BugsTo
+	}
+	if cfg.Upstream.Doc != "" {
+		m.Upstream.Doc = cfg.Upstream.Doc
+	}
+	for _, rid := range cfg.Upstream.RemoteIDs {
+		m.Upstream.RemoteId = append(m.Upstream.RemoteId, gentooRemoteId{
+			Type:  rid.Type,
+			Value: rid.ID,
+		})
+	}
+
+	if len(cfg.Upstream.RemoteIDs) == 0 {
+		if rep := ctx.Config.Release.GitHub.String(); rep != "" {
+			m.Upstream.RemoteId = append(m.Upstream.RemoteId, gentooRemoteId{Type: "github", Value: rep})
+		}
+		if rep := ctx.Config.Release.GitLab.String(); rep != "" {
+			m.Upstream.RemoteId = append(m.Upstream.RemoteId, gentooRemoteId{Type: "gitlab", Value: rep})
+		}
+		if rep := ctx.Config.Release.Gitea.String(); rep != "" {
+			m.Upstream.RemoteId = append(m.Upstream.RemoteId, gentooRemoteId{Type: "gitea", Value: rep})
+		}
+	}
 }
 
 func (m *gentooMetadata) Marshal() ([]byte, error) {
@@ -278,7 +311,7 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 	metadataPath := path.Join(dir, "metadata.xml")
 	manifestPath := path.Join(dir, "Manifest")
 
-	if len(cfg.Maintainers) > 0 || cfg.BugsTo != "" || len(cfg.UseFlags) > 0 {
+	if len(cfg.Maintainers) > 0 || cfg.BugsTo != "" || len(cfg.UseFlags) > 0 || cfg.LongDescription != "" || len(cfg.Upstream.RemoteIDs) > 0 || ctx.Config.Release.GitHub.String() != "" || ctx.Config.Release.GitLab.String() != "" || ctx.Config.Release.Gitea.String() != "" {
 		meta := gentooMetadata{}
 		if dl, ok := repoClient.(client.FileDownloader); ok {
 			content, err := dl.DownloadFile(ctx, repo, metadataPath)
@@ -295,7 +328,10 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 		if err := meta.AddMaintainers(cfg.Maintainers); err != nil {
 			return err
 		}
-		meta.SetUpstream(cfg.BugsTo)
+		if cfg.LongDescription != "" {
+			meta.LongDescription = &gentooInnerNode{XMLName: xml.Name{Local: "longdescription"}, Content: cfg.LongDescription}
+		}
+		meta.SetUpstream(ctx, cfg)
 
 		content, err := meta.Marshal()
 		if err != nil {
