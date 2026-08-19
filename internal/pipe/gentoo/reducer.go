@@ -356,6 +356,42 @@ type conditionExpr interface {
 	Equals(other conditionExpr) bool
 }
 
+// TrueExpr represents a boolean constant true condition AST node.
+type TrueExpr struct{}
+
+func (TrueExpr) isConditionExpr() {}
+
+func (TrueExpr) String() string {
+	return "True"
+}
+
+func (TrueExpr) Shell() string {
+	return "true"
+}
+
+func (TrueExpr) Equals(other conditionExpr) bool {
+	_, ok := other.(TrueExpr)
+	return ok
+}
+
+// FalseExpr represents a boolean constant false condition AST node.
+type FalseExpr struct{}
+
+func (FalseExpr) isConditionExpr() {}
+
+func (FalseExpr) String() string {
+	return "False"
+}
+
+func (FalseExpr) Shell() string {
+	return "false"
+}
+
+func (FalseExpr) Equals(other conditionExpr) bool {
+	_, ok := other.(FalseExpr)
+	return ok
+}
+
 // ArchExpr represents an architecture condition predicate, e.g. Arch(amd64).
 type ArchExpr struct {
 	Arch string
@@ -415,6 +451,10 @@ func (n NotExpr) Shell() string {
 		return ""
 	}
 	switch inner := n.Expr.(type) {
+	case TrueExpr:
+		return "false"
+	case FalseExpr:
+		return "true"
 	case ArchExpr:
 		return "! use " + inner.Arch
 	case UseExpr:
@@ -525,10 +565,16 @@ func NewNotExpr(expr conditionExpr) conditionExpr {
 	if expr == nil {
 		return nil
 	}
-	if n, ok := expr.(NotExpr); ok {
-		return n.Expr // NOT(NOT(x)) -> x
+	switch e := expr.(type) {
+	case TrueExpr:
+		return FalseExpr{}
+	case FalseExpr:
+		return TrueExpr{}
+	case NotExpr:
+		return e.Expr // NOT(NOT(x)) -> x
+	default:
+		return NotExpr{Expr: expr}
 	}
-	return NotExpr{Expr: expr}
 }
 
 // NewAndExpr creates a canonicalized, flattened, deduplicated AND expression.
@@ -553,9 +599,29 @@ func NewAndExpr(exprs ...conditionExpr) conditionExpr {
 		return nil
 	}
 
+	hasTrue := false
+	var filtered []conditionExpr
+	for _, e := range flattened {
+		if _, isFalse := e.(FalseExpr); isFalse {
+			return FalseExpr{}
+		}
+		if _, isTrue := e.(TrueExpr); isTrue {
+			hasTrue = true
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+
+	if len(filtered) == 0 {
+		if hasTrue {
+			return TrueExpr{}
+		}
+		return nil
+	}
+
 	// Deduplicate using Equals
 	var unique []conditionExpr
-	for _, e := range flattened {
+	for _, e := range filtered {
 		if !slices.ContainsFunc(unique, func(u conditionExpr) bool {
 			return e.Equals(u)
 		}) {
@@ -596,9 +662,29 @@ func NewOrExpr(exprs ...conditionExpr) conditionExpr {
 		return nil
 	}
 
+	hasFalse := false
+	var filtered []conditionExpr
+	for _, e := range flattened {
+		if _, isTrue := e.(TrueExpr); isTrue {
+			return TrueExpr{}
+		}
+		if _, isFalse := e.(FalseExpr); isFalse {
+			hasFalse = true
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+
+	if len(filtered) == 0 {
+		if hasFalse {
+			return FalseExpr{}
+		}
+		return nil
+	}
+
 	// Deduplicate using Equals
 	var unique []conditionExpr
-	for _, e := range flattened {
+	for _, e := range filtered {
 		if !slices.ContainsFunc(unique, func(u conditionExpr) bool {
 			return e.Equals(u)
 		}) {
@@ -678,16 +764,21 @@ func isUniversalArchExpr(expr conditionExpr, universe []string) bool {
 
 // simplifyExpr recursively simplifies universal architecture predicates anywhere in an expression tree.
 func simplifyExpr(expr conditionExpr, universe []string) conditionExpr {
-	if expr == nil || len(universe) == 0 {
+	if expr == nil {
+		return nil
+	}
+	if len(universe) == 0 {
 		return expr
 	}
 	if isUniversalArchExpr(expr, universe) {
-		return nil
+		return TrueExpr{}
 	}
 	switch e := expr.(type) {
+	case TrueExpr, FalseExpr:
+		return e
 	case ArchExpr:
 		if len(universe) == 1 && universe[0] == e.Arch {
-			return nil
+			return TrueExpr{}
 		}
 		return e
 	case NotExpr:
@@ -703,12 +794,6 @@ func simplifyExpr(expr conditionExpr, universe []string) conditionExpr {
 			if s != nil {
 				terms = append(terms, s)
 			}
-		}
-		if len(terms) == 0 {
-			return nil
-		}
-		if len(terms) == 1 {
-			return terms[0]
 		}
 		return NewAndExpr(terms...)
 	case OrExpr:
@@ -728,26 +813,19 @@ func simplifyExpr(expr conditionExpr, universe []string) conditionExpr {
 				}
 			}
 			if coversAll {
-				return nil
+				return TrueExpr{}
 			}
 		}
 
 		var terms []conditionExpr
 		for _, sub := range e.Exprs {
 			if isUniversalArchExpr(sub, universe) {
-				return nil
+				return TrueExpr{}
 			}
 			s := simplifyExpr(sub, universe)
-			if s == nil {
-				return nil
+			if s != nil {
+				terms = append(terms, s)
 			}
-			terms = append(terms, s)
-		}
-		if len(terms) == 0 {
-			return nil
-		}
-		if len(terms) == 1 {
-			return terms[0]
 		}
 		return NewOrExpr(terms...)
 	default:
@@ -774,12 +852,7 @@ func (p *installPlan) reducePlan() *installPlan {
 	current := p
 	const maxIterations = 100
 	for range maxIterations {
-		initialState := map[StateFamily]string{
-			StateFamilyExe: "",
-			StateFamilyIns: "",
-			StateFamilyBin: "",
-			StateFamilyDoc: "",
-		}
+		initialState := make(map[StateFamily]string)
 		next := &installPlan{
 			UniverseArchitectures: current.UniverseArchitectures,
 			Body:                  reduceStmts(current.Body, current.UniverseArchitectures, initialState),
@@ -789,7 +862,7 @@ func (p *installPlan) reducePlan() *installPlan {
 		}
 		current = next
 	}
-	return current
+	panic(fmt.Sprintf("reducer failed to converge after %d iterations", maxIterations))
 }
 
 func (p *installPlan) Validate() error {
@@ -832,9 +905,12 @@ func reduceStmts(stmts []installStmt, universe []string, state map[StateFamily]s
 		switch s := stmt.(type) {
 		case conditionStmt:
 			simplifiedExpr := simplifyExpr(s.Expr, universe)
-			if simplifiedExpr == nil {
+			if simplifiedExpr == nil || simplifiedExpr.Equals(TrueExpr{}) {
 				sBody := reduceStmts(s.Body, universe, state)
 				reduced = append(reduced, sBody...)
+				continue
+			}
+			if simplifiedExpr.Equals(FalseExpr{}) {
 				continue
 			}
 			s.Expr = simplifiedExpr
@@ -853,16 +929,15 @@ func reduceStmts(stmts []installStmt, universe []string, state map[StateFamily]s
 			s.Body = reducedBody
 			reduced = append(reduced, s)
 
-			// Join state: any key mutated in branch is now uncertain (divergent)
-			for k := range state {
-				if branchState[k] != stateBefore[k] {
+			// Join state: any family whose value diverged in the branch becomes uncertain
+			for k, vBefore := range stateBefore {
+				vBranch, ok := branchState[k]
+				if !ok || vBranch != vBefore {
 					delete(state, k)
 				}
 			}
-			for k, v := range branchState {
-				if _, exists := stateBefore[k]; !exists {
-					delete(state, k)
-				} else if stateBefore[k] != v {
+			for k := range branchState {
+				if _, ok := stateBefore[k]; !ok {
 					delete(state, k)
 				}
 			}
@@ -946,7 +1021,7 @@ func factorConditionsSlice(conds []conditionStmt) []installStmt {
 			var innerBody []installStmt
 			for k := i; k <= bestJ; k++ {
 				rem := removeTerm(conds[k].Expr, bestFactor)
-				if rem == nil {
+				if rem == nil || rem.Equals(TrueExpr{}) {
 					innerBody = append(innerBody, conds[k].Body...)
 				} else {
 					innerBody = append(innerBody, conditionStmt{
@@ -1035,7 +1110,7 @@ func removeTerm(expr conditionExpr, term conditionExpr) conditionExpr {
 		return expr
 	}
 	if expr.Equals(term) {
-		return nil
+		return TrueExpr{}
 	}
 	if and, ok := expr.(AndExpr); ok {
 		var remaining []conditionExpr
@@ -1045,7 +1120,7 @@ func removeTerm(expr conditionExpr, term conditionExpr) conditionExpr {
 			}
 		}
 		if len(remaining) == 0 {
-			return nil
+			return TrueExpr{}
 		}
 		if len(remaining) == 1 {
 			return remaining[0]

@@ -358,7 +358,6 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 
 	if !slices.Contains(eclasses, "systemd") && len(data.Systemd) > 0 {
 		for _, item := range data.Systemd {
-			item.Target = "1"
 			item.Dir = "/usr/lib/systemd/system"
 			item.StateFamily = StateFamilyIns
 			item.Section = "doins"

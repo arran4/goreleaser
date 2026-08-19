@@ -110,6 +110,54 @@ func TestConditionExprAlgebra(t *testing.T) {
 		require.True(t, inner.Equals(notNot))
 	})
 
+	t.Run("double NOT involving True and False", func(t *testing.T) {
+		tr := TrueExpr{}
+		fa := FalseExpr{}
+
+		require.Equal(t, fa, NewNotExpr(tr))
+		require.Equal(t, tr, NewNotExpr(NewNotExpr(tr)))
+		require.Equal(t, tr, NewNotExpr(fa))
+		require.Equal(t, fa, NewNotExpr(NewNotExpr(fa)))
+	})
+
+	t.Run("Boolean constant identities", func(t *testing.T) {
+		x := UseExpr{Flag: "x"}
+
+		// NOT(True) -> False, NOT(False) -> True
+		require.Equal(t, FalseExpr{}, NewNotExpr(TrueExpr{}))
+		require.Equal(t, TrueExpr{}, NewNotExpr(FalseExpr{}))
+
+		// AND(True, X) -> X, AND(False, X) -> False
+		require.Equal(t, x, NewAndExpr(TrueExpr{}, x))
+		require.Equal(t, FalseExpr{}, NewAndExpr(FalseExpr{}, x))
+
+		// OR(True, X) -> True, OR(False, X) -> X
+		require.Equal(t, TrueExpr{}, NewOrExpr(TrueExpr{}, x))
+		require.Equal(t, x, NewOrExpr(FalseExpr{}, x))
+	})
+
+	t.Run("nested True/False several levels deep", func(t *testing.T) {
+		foo := UseExpr{Flag: "foo"}
+
+		// AND(True, OR(False, AND(True, Use(foo)))) -> Use(foo)
+		nested1 := NewAndExpr(TrueExpr{}, NewOrExpr(FalseExpr{}, NewAndExpr(TrueExpr{}, foo)))
+		require.Equal(t, foo, nested1)
+
+		// OR(False, AND(True, True)) -> True
+		nested2 := NewOrExpr(FalseExpr{}, NewAndExpr(TrueExpr{}, TrueExpr{}))
+		require.Equal(t, TrueExpr{}, nested2)
+
+		// NOT(AND(True, NOT(False))) -> False
+		nested3 := NewNotExpr(NewAndExpr(TrueExpr{}, NewNotExpr(FalseExpr{})))
+		require.Equal(t, FalseExpr{}, nested3)
+
+		// AND(Use(a), OR(True, AND(False, Use(b)))) -> Use(a)
+		a := UseExpr{Flag: "a"}
+		b := UseExpr{Flag: "b"}
+		nested4 := NewAndExpr(a, NewOrExpr(TrueExpr{}, NewAndExpr(FalseExpr{}, b)))
+		require.Equal(t, a, nested4)
+	})
+
 	t.Run("AND flattening and deduplication", func(t *testing.T) {
 		a := ArchExpr{Arch: "amd64"}
 		b := UseExpr{Flag: "extended"}
@@ -142,23 +190,48 @@ func TestConditionExprAlgebra(t *testing.T) {
 func TestUniversalArchSimplification(t *testing.T) {
 	universe := []string{"amd64", "arm64"}
 
-	t.Run("Universal Arch at root", func(t *testing.T) {
+	t.Run("Universal Arch at root yields True", func(t *testing.T) {
 		or := NewOrExpr(ArchExpr{Arch: "amd64"}, ArchExpr{Arch: "arm64"})
 		require.True(t, isUniversalArchExpr(or, universe))
-		require.Nil(t, simplifyExpr(or, universe))
+		require.Equal(t, TrueExpr{}, simplifyExpr(or, universe))
 	})
 
-	t.Run("Single-arch universe", func(t *testing.T) {
+	t.Run("Single-arch universe yields True", func(t *testing.T) {
 		singleUniverse := []string{"amd64"}
 		arch := ArchExpr{Arch: "amd64"}
 		require.True(t, isUniversalArchExpr(arch, singleUniverse))
-		require.Nil(t, simplifyExpr(arch, singleUniverse))
+		require.Equal(t, TrueExpr{}, simplifyExpr(arch, singleUniverse))
 	})
 
 	t.Run("Partial arch set is not universal", func(t *testing.T) {
 		arch := ArchExpr{Arch: "amd64"}
 		require.False(t, isUniversalArchExpr(arch, universe))
 		require.Equal(t, arch, simplifyExpr(arch, universe))
+	})
+
+	t.Run("NOT(universal architecture) simplifies to False", func(t *testing.T) {
+		univ := NewOrExpr(ArchExpr{Arch: "amd64"}, ArchExpr{Arch: "arm64"})
+		notUniv := NewNotExpr(univ)
+		simplified := simplifyExpr(notUniv, universe)
+		require.Equal(t, FalseExpr{}, simplified)
+	})
+
+	t.Run("AND(NOT(universal architecture), Use(foo)) simplifies to False", func(t *testing.T) {
+		univ := NewOrExpr(ArchExpr{Arch: "amd64"}, ArchExpr{Arch: "arm64"})
+		notUniv := NewNotExpr(univ)
+		foo := UseExpr{Flag: "foo"}
+		and := NewAndExpr(notUniv, foo)
+		simplified := simplifyExpr(and, universe)
+		require.Equal(t, FalseExpr{}, simplified)
+	})
+
+	t.Run("OR(NOT(universal architecture), Use(foo)) simplifies to Use(foo)", func(t *testing.T) {
+		univ := NewOrExpr(ArchExpr{Arch: "amd64"}, ArchExpr{Arch: "arm64"})
+		notUniv := NewNotExpr(univ)
+		foo := UseExpr{Flag: "foo"}
+		or := NewOrExpr(notUniv, foo)
+		simplified := simplifyExpr(or, universe)
+		require.Equal(t, foo, simplified)
 	})
 
 	t.Run("AND(UniversalArch, Use(foo)) simplifies to Use(foo)", func(t *testing.T) {
@@ -169,12 +242,12 @@ func TestUniversalArchSimplification(t *testing.T) {
 		require.Equal(t, foo, simplified)
 	})
 
-	t.Run("OR(UniversalArch, Use(foo)) simplifies to nil (true)", func(t *testing.T) {
+	t.Run("OR(UniversalArch, Use(foo)) simplifies to True", func(t *testing.T) {
 		univ := NewOrExpr(ArchExpr{Arch: "amd64"}, ArchExpr{Arch: "arm64"})
 		foo := UseExpr{Flag: "foo"}
 		or := NewOrExpr(univ, foo)
 		simplified := simplifyExpr(or, universe)
-		require.Nil(t, simplified)
+		require.Equal(t, TrueExpr{}, simplified)
 	})
 
 	t.Run("nested AND containing UniversalArch", func(t *testing.T) {
@@ -186,7 +259,7 @@ func TestUniversalArchSimplification(t *testing.T) {
 		require.Equal(t, NewAndExpr(foo, bar), simplified)
 	})
 
-	t.Run("reducer unwraps universal arch condition block", func(t *testing.T) {
+	t.Run("reducer unwraps universal arch condition block (True)", func(t *testing.T) {
 		plan := &installPlan{
 			UniverseArchitectures: universe,
 			Body: []installStmt{
@@ -202,6 +275,22 @@ func TestUniversalArchSimplification(t *testing.T) {
 		require.Len(t, reduced.Body, 1)
 		require.IsType(t, actionStmt{}, reduced.Body[0])
 		require.Equal(t, "doexe \"app\"\n", reduced.Body[0].String(""))
+	})
+
+	t.Run("reducer removes negated universal arch condition block (False)", func(t *testing.T) {
+		plan := &installPlan{
+			UniverseArchitectures: universe,
+			Body: []installStmt{
+				conditionStmt{
+					Expr: NewNotExpr(NewOrExpr(ArchExpr{Arch: "amd64"}, ArchExpr{Arch: "arm64"})),
+					Body: []installStmt{
+						actionStmt{Op: OpDoexe, Source: "app"},
+					},
+				},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Empty(t, reduced.Body)
 	})
 
 	t.Run("reducer retains partial arch condition block", func(t *testing.T) {
@@ -386,6 +475,97 @@ func TestDestinationStateModeling(t *testing.T) {
 		}
 		reduced := plan.reducePlan()
 		require.Len(t, reduced.Body, 4)
+	})
+
+	t.Run("first required setter with default value is retained", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				stateStmt{Family: StateFamilyExe, Value: ""},
+				actionStmt{Op: OpDoexe, Source: "foo"},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 2)
+		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: ""}, reduced.Body[0])
+		require.Equal(t, actionStmt{Op: OpDoexe, Source: "foo"}, reduced.Body[1])
+	})
+
+	t.Run("consecutive identical setters are deduplicated", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				stateStmt{Family: StateFamilyExe, Value: "/opt/bin"},
+				stateStmt{Family: StateFamilyExe, Value: "/opt/bin"},
+				actionStmt{Op: OpDoexe, Source: "foo"},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 2)
+		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: "/opt/bin"}, reduced.Body[0])
+		require.Equal(t, actionStmt{Op: OpDoexe, Source: "foo"}, reduced.Body[1])
+	})
+
+	t.Run("conditional dataflow restores required state outside branch", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				stateStmt{Family: StateFamilyExe, Value: "/a"},
+				actionStmt{Op: OpDoexe, Source: "a"},
+				conditionStmt{
+					Expr: UseExpr{Flag: "x"},
+					Body: []installStmt{
+						stateStmt{Family: StateFamilyExe, Value: "/b"},
+						actionStmt{Op: OpDoexe, Source: "x"},
+					},
+				},
+				stateStmt{Family: StateFamilyExe, Value: "/a"},
+				actionStmt{Op: OpDoexe, Source: "y"},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 5)
+		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: "/a"}, reduced.Body[0])
+		require.Equal(t, actionStmt{Op: OpDoexe, Source: "a"}, reduced.Body[1])
+		require.IsType(t, conditionStmt{}, reduced.Body[2])
+		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: "/a"}, reduced.Body[3])
+		require.Equal(t, actionStmt{Op: OpDoexe, Source: "y"}, reduced.Body[4])
+	})
+
+	t.Run("insinto retention and deduplication", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				stateStmt{Family: StateFamilyIns, Value: ""},
+				actionStmt{Op: OpDoins, Source: "config.yaml"},
+				stateStmt{Family: StateFamilyIns, Value: ""},
+				actionStmt{Op: OpDoins, Source: "extra.yaml"},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 3)
+		require.Equal(t, stateStmt{Family: StateFamilyIns, Value: ""}, reduced.Body[0])
+		require.Equal(t, actionStmt{Op: OpDoins, Source: "config.yaml"}, reduced.Body[1])
+		require.Equal(t, actionStmt{Op: OpDoins, Source: "extra.yaml"}, reduced.Body[2])
+	})
+
+	t.Run("into and docinto retention and deduplication", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				stateStmt{Family: StateFamilyBin, Value: "/usr/local"},
+				actionStmt{Op: OpDobin, Source: "tool1"},
+				stateStmt{Family: StateFamilyBin, Value: "/usr/local"},
+				actionStmt{Op: OpDobin, Source: "tool2"},
+				stateStmt{Family: StateFamilyDoc, Value: "html"},
+				actionStmt{Op: OpDodoc, Source: "index.html"},
+				stateStmt{Family: StateFamilyDoc, Value: "html"},
+				actionStmt{Op: OpDodoc, Source: "style.css"},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 6)
+		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/usr/local"}, reduced.Body[0])
+		require.Equal(t, actionStmt{Op: OpDobin, Source: "tool1"}, reduced.Body[1])
+		require.Equal(t, actionStmt{Op: OpDobin, Source: "tool2"}, reduced.Body[2])
+		require.Equal(t, stateStmt{Family: StateFamilyDoc, Value: "html"}, reduced.Body[3])
+		require.Equal(t, actionStmt{Op: OpDodoc, Source: "index.html"}, reduced.Body[4])
+		require.Equal(t, actionStmt{Op: OpDodoc, Source: "style.css"}, reduced.Body[5])
 	})
 
 	t.Run("state inside conditional is local and does not eliminate required state outside", func(t *testing.T) {
@@ -581,30 +761,278 @@ func TestSiblingConditionMergingAndFactoring(t *testing.T) {
 }
 
 func TestReducerIdempotenceAndConvergence(t *testing.T) {
-	plan := &installPlan{
-		UniverseArchitectures: []string{"amd64", "arm64", "riscv64"},
-		Body: []installStmt{
-			stateStmt{Family: StateFamilyExe, Value: "/usr/bin"},
-			conditionStmt{
-				Expr: NewAndExpr(ArchExpr{Arch: "amd64"}, UseExpr{Flag: "extended"}),
-				Body: []installStmt{actionStmt{Op: OpDoexe, Source: "prog_amd64_ext"}},
+	t.Run("canonical reduction idempotence", func(t *testing.T) {
+		plan := &installPlan{
+			UniverseArchitectures: []string{"amd64", "arm64", "riscv64"},
+			Body: []installStmt{
+				stateStmt{Family: StateFamilyExe, Value: "/usr/bin"},
+				conditionStmt{
+					Expr: NewAndExpr(ArchExpr{Arch: "amd64"}, UseExpr{Flag: "extended"}),
+					Body: []installStmt{actionStmt{Op: OpDoexe, Source: "prog_amd64_ext"}},
+				},
+				conditionStmt{
+					Expr: NewAndExpr(ArchExpr{Arch: "amd64"}, NewNotExpr(UseExpr{Flag: "extended"})),
+					Body: []installStmt{actionStmt{Op: OpDoexe, Source: "prog_amd64_std"}},
+				},
+				conditionStmt{
+					Expr: ArchExpr{Arch: "arm64"},
+					Body: []installStmt{actionStmt{Op: OpDoexe, Source: "prog_arm64"}},
+				},
 			},
-			conditionStmt{
-				Expr: NewAndExpr(ArchExpr{Arch: "amd64"}, NewNotExpr(UseExpr{Flag: "extended"})),
-				Body: []installStmt{actionStmt{Op: OpDoexe, Source: "prog_amd64_std"}},
+		}
+
+		once := plan.reducePlan()
+		twice := once.reducePlan()
+
+		require.True(t, planEqual(once, twice))
+		require.Equal(t, once, twice)
+	})
+
+	t.Run("deeply nested structure idempotence", func(t *testing.T) {
+		plan := &installPlan{
+			UniverseArchitectures: []string{"amd64", "arm64", "riscv64"},
+			Body: []installStmt{
+				stateStmt{Family: StateFamilyExe, Value: "/opt/bin"},
+				conditionStmt{
+					Expr: ArchExpr{Arch: "amd64"},
+					Body: []installStmt{
+						conditionStmt{
+							Expr: UseExpr{Flag: "gui"},
+							Body: []installStmt{
+								conditionStmt{
+									Expr: UseExpr{Flag: "opengl"},
+									Body: []installStmt{
+										stateStmt{Family: StateFamilyExe, Value: "/opt/gl"},
+										actionStmt{Op: OpDoexe, Source: "app_gl"},
+									},
+								},
+								conditionStmt{
+									Expr: NewNotExpr(UseExpr{Flag: "opengl"}),
+									Body: []installStmt{
+										stateStmt{Family: StateFamilyExe, Value: "/opt/sw"},
+										actionStmt{Op: OpDoexe, Source: "app_sw"},
+									},
+								},
+							},
+						},
+						conditionStmt{
+							Expr: NewNotExpr(UseExpr{Flag: "gui"}),
+							Body: []installStmt{
+								actionStmt{Op: OpDoexe, Source: "app_cli"},
+							},
+						},
+					},
+				},
+				conditionStmt{
+					Expr: ArchExpr{Arch: "arm64"},
+					Body: []installStmt{
+						actionStmt{Op: OpDoexe, Source: "app_arm"},
+					},
+				},
+				stateStmt{Family: StateFamilyExe, Value: "/opt/bin"},
+				actionStmt{Op: OpDoexe, Source: "app_common"},
 			},
-			conditionStmt{
-				Expr: ArchExpr{Arch: "arm64"},
-				Body: []installStmt{actionStmt{Op: OpDoexe, Source: "prog_arm64"}},
-			},
+		}
+
+		once := plan.reducePlan()
+		twice := once.reducePlan()
+		thrice := twice.reducePlan()
+
+		require.True(t, planEqual(once, twice))
+		require.True(t, planEqual(twice, thrice))
+		require.Equal(t, once, twice)
+	})
+}
+
+func TestDecomposeDestination(t *testing.T) {
+	testCases := []struct {
+		name           string
+		section        string
+		src            string
+		dst            string
+		defaultDir     string
+		expectedFamily StateFamily
+		expectedDir    string
+		expectedBase   string
+		expectErr      bool
+		errContains    string
+	}{
+		{
+			name:           "dobin -> default",
+			section:        "dobin",
+			src:            "bin/mycli",
+			dst:            "",
+			expectedFamily: StateFamilyNone,
+			expectedDir:    "",
+			expectedBase:   "mycli",
+		},
+		{
+			name:           "newbin rename",
+			section:        "dobin",
+			src:            "bin/mycli_v2",
+			dst:            "mycli",
+			expectedFamily: StateFamilyNone,
+			expectedDir:    "",
+			expectedBase:   "mycli",
+		},
+		{
+			name:           "dobin under custom into root",
+			section:        "dobin",
+			src:            "bin/mycli",
+			dst:            "/usr/local/bin/mycli",
+			expectedFamily: StateFamilyBin,
+			expectedDir:    "/usr/local",
+			expectedBase:   "mycli",
+		},
+		{
+			name:           "dosbin under custom into root",
+			section:        "dosbin",
+			src:            "sbin/mydaemon",
+			dst:            "/opt/foo/sbin/mydaemon",
+			expectedFamily: StateFamilyBin,
+			expectedDir:    "/opt/foo",
+			expectedBase:   "mydaemon",
+		},
+		{
+			name:           "doexe with exeinto",
+			section:        "doexe",
+			src:            "prog",
+			dst:            "/opt/myprog/prog",
+			defaultDir:     "/opt/bin",
+			expectedFamily: StateFamilyExe,
+			expectedDir:    "/opt/myprog",
+			expectedBase:   "prog",
+		},
+		{
+			name:           "doexe with defaultDir fallback",
+			section:        "doexe",
+			src:            "prog",
+			dst:            "",
+			defaultDir:     "/opt/bin",
+			expectedFamily: StateFamilyExe,
+			expectedDir:    "/opt/bin",
+			expectedBase:   "prog",
+		},
+		{
+			name:           "doins with insinto",
+			section:        "doins",
+			src:            "config.yaml",
+			dst:            "/etc/myapp/config.yaml",
+			defaultDir:     "/",
+			expectedFamily: StateFamilyIns,
+			expectedDir:    "/etc/myapp",
+			expectedBase:   "config.yaml",
+		},
+		{
+			name:           "systemd_newunit two arguments",
+			section:        "systemd",
+			src:            "app.service",
+			dst:            "/usr/lib/systemd/system/app-custom.service",
+			expectedFamily: StateFamilyNone,
+			expectedDir:    "",
+			expectedBase:   "app-custom.service",
+		},
+		{
+			name:           "fixed-destination helper valid rename (doconfd)",
+			section:        "doconfd",
+			src:            "foo.confd",
+			dst:            "/etc/conf.d/foo",
+			expectedFamily: StateFamilyNone,
+			expectedDir:    "",
+			expectedBase:   "foo",
+		},
+		{
+			name:           "fixed-destination helper valid rename (doinitd)",
+			section:        "doinitd",
+			src:            "foo.init",
+			dst:            "foo",
+			expectedFamily: StateFamilyNone,
+			expectedDir:    "",
+			expectedBase:   "foo",
+		},
+		{
+			name:           "fixed-destination helper valid rename (doheader)",
+			section:        "doheader",
+			src:            "foo_impl.h",
+			dst:            "/usr/include/foo.h",
+			expectedFamily: StateFamilyNone,
+			expectedDir:    "",
+			expectedBase:   "foo.h",
+		},
+		{
+			name:        "fixed-destination helper incompatible directory (doconfd)",
+			section:     "doconfd",
+			src:         "foo.confd",
+			dst:         "/etc/foo/foo.confd",
+			expectErr:   true,
+			errContains: "incompatible with doconfd",
+		},
+		{
+			name:        "fixed-destination helper incompatible directory (doenvd)",
+			section:     "doenvd",
+			src:         "99foo",
+			dst:         "/etc/custom/99foo",
+			expectErr:   true,
+			errContains: "incompatible with doenvd",
+		},
+		{
+			name:        "fixed-destination helper incompatible directory (doinitd)",
+			section:     "doinitd",
+			src:         "foo.init",
+			dst:         "/etc/rc.d/foo",
+			expectErr:   true,
+			errContains: "incompatible with doinitd",
+		},
+		{
+			name:        "fixed-destination helper incompatible directory (doheader)",
+			section:     "doheader",
+			src:         "foo.h",
+			dst:         "/usr/local/include/foo.h",
+			expectErr:   true,
+			errContains: "incompatible with doheader",
+		},
+		{
+			name:        "fixed-destination helper incompatible directory (systemd)",
+			section:     "systemd",
+			src:         "foo.service",
+			dst:         "/etc/systemd/system/foo.service",
+			expectErr:   true,
+			errContains: "incompatible with systemd",
+		},
+		{
+			name:        "dobin incompatible directory",
+			section:     "dobin",
+			src:         "bin/cli",
+			dst:         "/usr/local/custom/cli",
+			expectErr:   true,
+			errContains: "incompatible with dobin",
+		},
+		{
+			name:        "dosbin incompatible directory",
+			section:     "dosbin",
+			src:         "sbin/daemon",
+			dst:         "/opt/bin/daemon",
+			expectErr:   true,
+			errContains: "incompatible with dosbin",
 		},
 	}
 
-	once := plan.reducePlan()
-	twice := once.reducePlan()
-
-	require.True(t, planEqual(once, twice))
-	require.Equal(t, once, twice)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			family, dir, base, err := decomposeDestination(tc.section, tc.src, tc.dst, tc.defaultDir)
+			if tc.expectErr {
+				require.Error(t, err)
+				if tc.errContains != "" {
+					require.Contains(t, err.Error(), tc.errContains)
+				}
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.expectedFamily, family)
+				require.Equal(t, tc.expectedDir, dir)
+				require.Equal(t, tc.expectedBase, base)
+			}
+		})
+	}
 }
 
 func TestRecursiveValidation(t *testing.T) {

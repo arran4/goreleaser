@@ -264,30 +264,176 @@ func (v *extraFilesProcessor) validate(name, src string) error {
 	return nil
 }
 
-func resolveStateFamily(sectionName, dir, defaultDir string) (StateFamily, string) {
+func decomposeDestination(sectionName, src, dst, defaultDir string) (StateFamily, string, string, error) {
 	switch sectionName {
-	case "doins":
-		if dir == "" {
-			dir = defaultDir
+	case "dobin":
+		if dst == "" {
+			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
 		}
-		return StateFamilyIns, dir
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir == "." || dir == "" {
+			return StateFamilyNone, "", base, nil
+		}
+		var root string
+		switch {
+		case dir == "bin" || dir == "/bin":
+			root = "/"
+		case strings.HasSuffix(dir, "/bin"):
+			root, _ = strings.CutSuffix(dir, "/bin")
+			if root == "" {
+				root = "/"
+			}
+		default:
+			return StateFamilyNone, "", "", fmt.Errorf("gentoo dobin: destination %q is incompatible with dobin; directory must end in /bin", dst)
+		}
+		return StateFamilyBin, root, base, nil
+
+	case "dosbin":
+		if dst == "" {
+			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir == "." || dir == "" {
+			return StateFamilyNone, "", base, nil
+		}
+		var root string
+		switch {
+		case dir == "sbin" || dir == "/sbin":
+			root = "/"
+		case strings.HasSuffix(dir, "/sbin"):
+			root, _ = strings.CutSuffix(dir, "/sbin")
+			if root == "" {
+				root = "/"
+			}
+		default:
+			return StateFamilyNone, "", "", fmt.Errorf("gentoo dosbin: destination %q is incompatible with dosbin; directory must end in /sbin", dst)
+		}
+		return StateFamilyBin, root, base, nil
+
 	case "doexe":
-		if dir == "" {
+		if dst == "" {
+			return StateFamilyExe, defaultDir, path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir == "." || dir == "" {
 			dir = defaultDir
 		}
-		return StateFamilyExe, dir
-	case "dobin", "dosbin":
-		if dir != "" {
-			return StateFamilyBin, dir
+		return StateFamilyExe, dir, base, nil
+
+	case "doins":
+		if dst == "" {
+			return StateFamilyIns, defaultDir, path.Base(filepath.ToSlash(src)), nil
 		}
-		return StateFamilyNone, ""
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir == "." || dir == "" {
+			dir = defaultDir
+		}
+		return StateFamilyIns, dir, base, nil
+
 	case "dodoc":
-		if dir != "" {
-			return StateFamilyDoc, dir
+		if dst == "" {
+			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
 		}
-		return StateFamilyNone, ""
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir == "." || dir == "" {
+			return StateFamilyNone, "", base, nil
+		}
+		docDir := strings.TrimPrefix(dir, "/")
+		return StateFamilyDoc, docDir, base, nil
+
+	case "doconfd":
+		if dst == "" {
+			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir != "." && dir != "" && dir != "/etc/conf.d" && dir != "etc/conf.d" {
+			return StateFamilyNone, "", "", fmt.Errorf("gentoo doconfd: destination %q is incompatible with doconfd; expected /etc/conf.d/<name>", dst)
+		}
+		return StateFamilyNone, "", base, nil
+
+	case "doenvd":
+		if dst == "" {
+			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir != "." && dir != "" && dir != "/etc/env.d" && dir != "etc/env.d" {
+			return StateFamilyNone, "", "", fmt.Errorf("gentoo doenvd: destination %q is incompatible with doenvd; expected /etc/env.d/<name>", dst)
+		}
+		return StateFamilyNone, "", base, nil
+
+	case "doinitd":
+		if dst == "" {
+			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir != "." && dir != "" && dir != "/etc/init.d" && dir != "etc/init.d" {
+			return StateFamilyNone, "", "", fmt.Errorf("gentoo doinitd: destination %q is incompatible with doinitd; expected /etc/init.d/<name>", dst)
+		}
+		return StateFamilyNone, "", base, nil
+
+	case "doheader":
+		if dst == "" {
+			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir != "." && dir != "" && dir != "/usr/include" && dir != "usr/include" {
+			return StateFamilyNone, "", "", fmt.Errorf("gentoo doheader: destination %q is incompatible with doheader; expected /usr/include/<name>", dst)
+		}
+		return StateFamilyNone, "", base, nil
+
+	case "systemd":
+		if dst == "" {
+			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir != "." && dir != "" && dir != "/usr/lib/systemd/system" && dir != "usr/lib/systemd/system" && dir != "/lib/systemd/system" && dir != "lib/systemd/system" {
+			return StateFamilyNone, "", "", fmt.Errorf("gentoo systemd: destination %q is incompatible with systemd; expected /usr/lib/systemd/system/<name>", dst)
+		}
+		return StateFamilyNone, "", base, nil
+
+	case "doman":
+		if dst == "" {
+			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir != "." && dir != "" {
+			trimmed := strings.TrimPrefix(dir, "/")
+			if !strings.HasPrefix(trimmed, "usr/share/man/man") && !strings.HasPrefix(trimmed, "share/man/man") {
+				return StateFamilyNone, "", "", fmt.Errorf("gentoo doman: destination %q is incompatible with doman; expected /usr/share/man/manX/<name>", dst)
+			}
+		}
+		return StateFamilyNone, "", base, nil
+
+	case "dosym":
+		return StateFamilyNone, "", dst, nil
+
+	case "dodir":
+		return StateFamilyNone, "", dst, nil
+
 	default:
-		return StateFamilyNone, ""
+		return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
 	}
 }
 
@@ -362,16 +508,10 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 					srcPath = path.Join(firstWrappedIn, d.Src)
 				}
 				target := d.Dst
-				dir := path.Dir(filepath.ToSlash(d.Dst))
-				base := path.Base(filepath.ToSlash(d.Dst))
-				if dir == "." || dir == "" {
-					dir = ""
+				stateFamily, stateDir, base, err := decomposeDestination(sectionName, srcPath, d.Dst, defaultDir)
+				if err != nil {
+					return nil, err
 				}
-				if base == "." || base == "" {
-					base = path.Base(filepath.ToSlash(srcPath))
-				}
-
-				stateFamily, stateDir := resolveStateFamily(sectionName, dir, defaultDir)
 
 				items = append(items, installItemData{
 					Source:      srcPath,
@@ -397,22 +537,10 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 						sourcePath = path.Join(firstWrappedIn, b)
 					}
 					target := d.Dst
-					var dir, base string
-					if d.Dst == "" {
-						dir = ""
-						base = b
-					} else {
-						cleanedDst := filepath.ToSlash(d.Dst)
-						if path.Dir(cleanedDst) == "." || path.Dir(cleanedDst) == "" {
-							dir = ""
-							base = cleanedDst
-						} else {
-							dir = path.Dir(cleanedDst)
-							base = path.Base(cleanedDst)
-						}
+					stateFamily, stateDir, base, err := decomposeDestination(sectionName, sourcePath, d.Dst, defaultDir)
+					if err != nil {
+						return nil, err
 					}
-
-					stateFamily, stateDir := resolveStateFamily(sectionName, dir, defaultDir)
 
 					items = append(items, installItemData{
 						Source:      sourcePath,
@@ -434,16 +562,10 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 			src = "${FILESDIR}/" + strings.TrimPrefix(d.Src, "files/")
 		}
 
-		dir := path.Dir(filepath.ToSlash(d.Dst))
-		base := path.Base(filepath.ToSlash(d.Dst))
-		if dir == "." || dir == "" {
-			dir = ""
+		stateFamily, stateDir, base, err := decomposeDestination(sectionName, src, d.Dst, defaultDir)
+		if err != nil {
+			return nil, err
 		}
-		if base == "." || base == "" {
-			base = path.Base(filepath.ToSlash(src))
-		}
-
-		stateFamily, stateDir := resolveStateFamily(sectionName, dir, defaultDir)
 
 		items = append(items, installItemData{
 			Source:      src,

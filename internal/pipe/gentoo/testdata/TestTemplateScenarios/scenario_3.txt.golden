@@ -15,8 +15,10 @@ S="${WORKDIR}"
 
 src_install() {
   if use amd64; then
+    exeinto
     newexe "prog1_x86" "prog1" || die "Failed to install prog1_x86"
   fi
+  exeinto
   doexe "prog2" || die "Failed to install prog2"
   if use arm64; then
     newexe "prog1_arm" "prog1" || die "Failed to install prog1_arm"
