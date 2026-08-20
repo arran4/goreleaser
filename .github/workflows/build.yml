@@ -40,6 +40,7 @@ jobs:
   ruleguard:
     uses: caarlos0/meta/.github/workflows/ruleguard.yml@c7f17af352dac91fa6c785d06ebac8547f1abdd3 # v0.1.0
     with:
+      go-version: "1.26.5"
       args: "-disable largeloopcopy"
   test:
     strategy:
