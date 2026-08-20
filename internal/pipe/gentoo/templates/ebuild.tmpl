@@ -29,76 +29,7 @@ IUSE="{{ range $i, $flag := .UseFlags }}{{ if $i }} {{ end }}{{ $flag.Flag }}{{ 
 S="${WORKDIR}"
 
 src_install() {
-{{- with .ExtraInstall }}
-  {{ . }}
-{{- end }}
-{{- if .InstallGroups }}
-{{- with .Bindir }}
-  exeinto {{ . }}
-{{- end }}
-{{- end }}
-{{- range .InstallGroups }}
-{{- if .Keywords }}
-  if {{ range $i, $k := .Keywords }}{{ if $i }} || {{ end }}use {{ $k }}{{ end }}; then
-{{- range .Installs }}
-    {{- if eq .Source .Target }}
-    doexe "{{ .Source }}" || die "Failed to install binary"
-    {{- else }}
-    newexe "{{ .Source }}" "{{ .Target }}" || die "Failed to install binary"
-    {{- end }}
-{{- end }}
-  fi
-{{- else }}
-{{- range .Installs }}
-  {{- if eq .Source .Target }}
-  doexe "{{ .Source }}" || die "Failed to install binary"
-  {{- else }}
-  newexe "{{ .Source }}" "{{ .Target }}" || die "Failed to install binary"
-  {{- end }}
-{{- end }}
-{{- end }}
-{{- end }}
-{{- $lastdir := "" }}
-{{- $lastswitchcmd := "" }}
-{{- range .Installers }}
-{{- $in_conditional := or .Keywords .Use }}
-{{- if .Keywords }}
-  if {{ range $i, $k := .Keywords }}{{ if $i }} || {{ end }}use {{ $k }}{{ end }}; then
-{{- end }}
-{{- if .Use }}
-  {{ if .Keywords }}  {{ end }}if {{ range $i, $u := .Use }}{{ if $i }} && {{ end }}{{ if eq (slice $u 0 1) "!" }}! use {{ slice $u 1 }}{{ else }}use {{ $u }}{{ end }}{{ end }}; then
-{{- end }}
-{{- if .DirSwitchCmd }}
-{{- $curdir := .Dir }}
-{{- if or (ne $lastdir $curdir) (ne $lastswitchcmd .DirSwitchCmd) $in_conditional }}
-  {{ if .Keywords }}  {{ end }}{{ if .Use }}  {{ end }}{{ .DirSwitchCmd }}{{ if eq $curdir "/" }} /{{ else if $curdir }} {{ $curdir }}{{ end }}
-{{- if not $in_conditional }}{{ $lastdir = $curdir }}{{ $lastswitchcmd = .DirSwitchCmd }}{{ else }}{{ $lastdir = "" }}{{ $lastswitchcmd = "" }}{{ end }}
-{{- end }}
-{{- end }}
-{{- if .Target }}
-  {{- if eq .InstallerCmd "dosym" }}
-  {{ if .Keywords }}  {{ end }}{{ if .Use }}  {{ end }}{{ .InstallerCmd }} "{{ .Source }}" "{{ .Target }}"
-  {{- else }}
-  {{- if eq .Source .Base }}
-  {{ if .Keywords }}  {{ end }}{{ if .Use }}  {{ end }}{{ .InstallerCmd }} "{{ .Source }}" || die "Failed to install {{ .Source }}"
-  {{- else }}
-  {{ if .Keywords }}  {{ end }}{{ if .Use }}  {{ end }}{{ .InstallRenameCmd }} "{{ .Source }}" "{{ .Base }}" || die "Failed to install {{ .Source }}"
-  {{- end }}
-  {{- end }}
-{{- else }}
-  {{ if .Keywords }}  {{ end }}{{ if .Use }}  {{ end }}{{ .InstallerCmd }} "{{ .Source }}" || die "Failed to install {{ .Source }}"
-{{- end }}
-{{- if .Use }}
-  {{ if .Keywords }}  {{ end }}fi
-{{- end }}
-{{- if .Keywords }}
-  fi
-{{- end }}
-{{- end }}
-{{- range .Doman }}
-  doman "{{ . }}"
-{{- end }}
-{{- range .Dodoc }}
-  dodoc "{{ . }}"
+{{- if .Plan }}
+{{ .InstallScript "  " }}
 {{- end }}
 }
