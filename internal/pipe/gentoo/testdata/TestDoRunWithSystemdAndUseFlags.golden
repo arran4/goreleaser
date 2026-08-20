@@ -20,7 +20,7 @@ src_install() {
   if ! use systemd; then
     newinitd "foo.init" "foo" || die "Failed to install foo.init"
   fi
-  dosym "/usr/bin/foo" "/usr/bin/bar"
+  dosym "/usr/bin/foo" "/usr/bin/bar" || die "Failed to install /usr/bin/foo"
   if use systemd; then
     insinto /usr/lib/systemd/system
     doins "foo.service" || die "Failed to install foo.service"

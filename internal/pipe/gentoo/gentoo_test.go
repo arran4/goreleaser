@@ -1,14 +1,12 @@
 package gentoo
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
-	"text/template"
 
 	"github.com/goreleaser/goreleaser/v2/internal/artifact"
 	"github.com/goreleaser/goreleaser/v2/internal/client"
@@ -779,124 +777,65 @@ func TestDoRunDifferentBinaries(t *testing.T) {
 }
 
 func TestTemplateScenarios(t *testing.T) {
-	tmplStr := ebuildTemplate
-
 	testCases := []struct {
-		name          string
-		installGroups []installGroup
-		doexe         []installItemData
+		name   string
+		bindir string
+		doexe  []config.GentooInstallItem
 	}{
 		{
 			name: "scenario_1",
-			installGroups: []installGroup{
-				{
-					Keywords: []string{"amd64", "arm64"},
-					Installs: []installData{
-						{Source: "prog1", Target: "prog1"},
-						{Source: "prog2", Target: "prog2"},
-					},
-				},
+			doexe: []config.GentooInstallItem{
+				{Src: "prog1", Archs: []string{"amd64", "arm64"}},
+				{Src: "prog2", Archs: []string{"amd64", "arm64"}},
 			},
 		},
 		{
 			name: "scenario_2",
-			installGroups: []installGroup{
-				{
-					Keywords: []string{"amd64"},
-					Installs: []installData{
-						{Source: "prog1_x86", Target: "prog1"},
-						{Source: "prog2_x86", Target: "prog2"},
-					},
-				},
-				{
-					Keywords: []string{"arm64"},
-					Installs: []installData{
-						{Source: "prog1_arm", Target: "prog1"},
-						{Source: "prog2_arm", Target: "prog2"},
-					},
-				},
+			doexe: []config.GentooInstallItem{
+				{Src: "prog1_x86", Dst: "prog1", Archs: []string{"amd64"}},
+				{Src: "prog2_x86", Dst: "prog2", Archs: []string{"amd64"}},
+				{Src: "prog1_arm", Dst: "prog1", Archs: []string{"arm64"}},
+				{Src: "prog2_arm", Dst: "prog2", Archs: []string{"arm64"}},
 			},
 		},
 		{
 			name: "scenario_3",
-			installGroups: []installGroup{
-				{
-					Keywords: []string{"amd64"},
-					Installs: []installData{
-						{Source: "prog1_x86", Target: "prog1"},
-					},
-				},
-				{
-					Installs: []installData{
-						{Source: "prog2", Target: "prog2"},
-					},
-				},
-				{
-					Keywords: []string{"arm64"},
-					Installs: []installData{
-						{Source: "prog1_arm", Target: "prog1"},
-						{Source: "prog3", Target: "prog2"},
-					},
-				},
+			doexe: []config.GentooInstallItem{
+				{Src: "prog1_x86", Dst: "prog1", Archs: []string{"amd64"}},
+				{Src: "prog2"},
+				{Src: "prog1_arm", Dst: "prog1", Archs: []string{"arm64"}},
+				{Src: "prog3", Dst: "prog2", Archs: []string{"arm64"}},
 			},
 		},
 		{
 			name: "scenario_doexe",
-			doexe: []installItemData{
-				{Source: "custom_bin", Target: "/opt/custom/custom_bin", Dir: "/opt/custom", Base: "custom_bin", InstallerCmd: "doexe", InstallRenameCmd: "newexe", DirSwitchCmd: "exeinto"},
-				{Source: "renamed_bin_x86", Target: "/opt/other/renamed_bin", Dir: "/opt/other", Base: "renamed_bin", Keywords: []string{"amd64"}, InstallerCmd: "doexe", InstallRenameCmd: "newexe", DirSwitchCmd: "exeinto"},
-				{Source: "default_bin", Target: "", Dir: "", Base: "", InstallerCmd: "doexe", InstallRenameCmd: "newexe", DirSwitchCmd: "exeinto"},
+			doexe: []config.GentooInstallItem{
+				{Src: "custom_bin", Dst: "/opt/custom/custom_bin"},
+				{Src: "renamed_bin_x86", Dst: "/opt/other/renamed_bin", Archs: []string{"amd64"}},
+				{Src: "default_bin"},
 			},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			data := struct {
-				Description   string
-				Homepage      string
-				License       string
-				Keywords      string
-				Bindir        string
-				ExtraInstall  string
-				Archs         []any
-				InstallGroups []installGroup
-				UseFlags      []config.GentooUseFlag
-				Dodir         []string
-				Dodoc         []string
-				Doman         []string
-				Systemd       []installItemData
-				Eclasses      []string
-				Installers    []installItemData
-			}{
-				InstallGroups: tc.installGroups,
-				Installers:    tc.doexe,
-				Bindir:        "/usr/bin",
-				UseFlags:      gentooUseFlags(config.Gentoo{}),
-			}
-			var buf bytes.Buffer
-			err := template.Must(template.New("ebuild").Funcs(template.FuncMap{
-				"escape": shellEscape,
-				"indentUse": func(keywords []string, _ []string) string {
-					ind := "  "
-					if len(keywords) > 0 {
-						ind += "  "
-					}
-					return ind
-				},
-				"indent": func(keywords []string, use []string) string {
-					ind := "  "
-					if len(keywords) > 0 {
-						ind += "  "
-					}
-					if len(use) > 0 {
-						ind += "  "
-					}
-					return ind
-				},
-			}).Parse(tmplStr)).Execute(&buf, data)
+			installers, err := lowerInstallItemsFromConfig("doexe", tc.doexe, "/opt/bin")
 			require.NoError(t, err)
-			golden.RequireEqualTxt(t, buf.Bytes())
+			plan := buildInstallPlan(tc.bindir, nil, "", nil, installers, nil, nil, nil)
+			require.NoError(t, plan.Validate())
+			reducedPlan := plan.reducePlan()
+			require.NoError(t, reducedPlan.Validate())
+			data := ebuildData{
+				Description: "test scenario ebuild",
+				License:     "MIT",
+				Bindir:      "/usr/bin",
+				UseFlags:    gentooUseFlags(config.Gentoo{}),
+				Plan:        reducedPlan,
+			}
+			require.NoError(t, data.Validate())
+			content, err := data.RenderEbuild()
+			require.NoError(t, err)
+			golden.RequireEqualTxt(t, []byte(content))
 		})
 	}
 }
@@ -940,8 +879,162 @@ func TestDoRunWithSystemdAndUseFlags(t *testing.T) {
 	ebuild := filepath.Join(dist, "gentoo", "default", "app-misc", "foo-bin", "foo-bin-1.0.0.ebuild")
 	bts, err := os.ReadFile(ebuild)
 	require.NoError(t, err)
-
 	golden.RequireEqual(t, bts)
+}
+
+func TestDoRunWithSystemdEclass(t *testing.T) {
+	t.Run("with systemd eclass uses systemd helpers for default and canonical rename", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "foo",
+			Gentoos: []config.Gentoo{{
+				Repository: config.RepoRef{Name: "overlay"},
+				Bin:        true,
+				License:    "MIT",
+				Eclasses:   []string{"systemd"},
+				Systemd: []config.GentooInstallItem{
+					{Src: "foo.service"},
+					{Src: "bar.service", Dst: "/usr/lib/systemd/system/bar-custom.service"},
+				},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "foo_1.0.0_linux_amd64.tar.gz",
+			Path:   "amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+		})
+
+		cli := client.NewMock()
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], cli))
+
+		ebuild := filepath.Join(dist, "gentoo", "default", "app-misc", "foo-bin", "foo-bin-1.0.0.ebuild")
+		bts, err := os.ReadFile(ebuild)
+		require.NoError(t, err)
+
+		content := string(bts)
+		require.Contains(t, content, `systemd_dounit "foo.service" || die "Failed to install foo.service"`)
+		require.Contains(t, content, `systemd_newunit "bar.service" "bar-custom.service" || die "Failed to install bar.service"`)
+	})
+
+	t.Run("with systemd eclass lowers explicit /lib to doins and newins", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "foo",
+			Gentoos: []config.Gentoo{{
+				Repository: config.RepoRef{Name: "overlay"},
+				Bin:        true,
+				License:    "MIT",
+				Eclasses:   []string{"systemd"},
+				Systemd: []config.GentooInstallItem{
+					{Src: "foo.service", Dst: "/lib/systemd/system/foo.service"},
+					{Src: "bar.service", Dst: "/lib/systemd/system/bar-custom.service"},
+				},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "foo_1.0.0_linux_amd64.tar.gz",
+			Path:   "amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+		})
+
+		cli := client.NewMock()
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], cli))
+
+		ebuild := filepath.Join(dist, "gentoo", "default", "app-misc", "foo-bin", "foo-bin-1.0.0.ebuild")
+		bts, err := os.ReadFile(ebuild)
+		require.NoError(t, err)
+
+		content := string(bts)
+		require.Contains(t, content, `insinto /lib/systemd/system`)
+		require.Contains(t, content, `doins "foo.service" || die "Failed to install foo.service"`)
+		require.Contains(t, content, `newins "bar.service" "bar-custom.service" || die "Failed to install bar.service"`)
+		require.NotContains(t, content, `systemd_dounit`)
+		require.NotContains(t, content, `systemd_newunit`)
+	})
+
+	t.Run("without systemd eclass lowers default to /usr/lib/systemd/system doins", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "foo",
+			Gentoos: []config.Gentoo{{
+				Repository: config.RepoRef{Name: "overlay"},
+				Bin:        true,
+				License:    "MIT",
+				Systemd: []config.GentooInstallItem{
+					{Src: "foo.service"},
+				},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "foo_1.0.0_linux_amd64.tar.gz",
+			Path:   "amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+		})
+
+		cli := client.NewMock()
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], cli))
+
+		ebuild := filepath.Join(dist, "gentoo", "default", "app-misc", "foo-bin", "foo-bin-1.0.0.ebuild")
+		bts, err := os.ReadFile(ebuild)
+		require.NoError(t, err)
+
+		content := string(bts)
+		require.Contains(t, content, `insinto /usr/lib/systemd/system`)
+		require.Contains(t, content, `doins "foo.service" || die "Failed to install foo.service"`)
+	})
+
+	t.Run("without systemd eclass preserves custom lib systemd path in fallback with doins and newins", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "foo",
+			Gentoos: []config.Gentoo{{
+				Repository: config.RepoRef{Name: "overlay"},
+				Bin:        true,
+				License:    "MIT",
+				Systemd: []config.GentooInstallItem{
+					{Src: "foo.service", Dst: "/lib/systemd/system/foo.service"},
+					{Src: "bar.service", Dst: "/lib/systemd/system/bar-custom.service"},
+				},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "foo_1.0.0_linux_amd64.tar.gz",
+			Path:   "amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+		})
+
+		cli := client.NewMock()
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], cli))
+
+		ebuild := filepath.Join(dist, "gentoo", "default", "app-misc", "foo-bin", "foo-bin-1.0.0.ebuild")
+		bts, err := os.ReadFile(ebuild)
+		require.NoError(t, err)
+
+		content := string(bts)
+		require.Contains(t, content, `insinto /lib/systemd/system`)
+		require.Contains(t, content, `doins "foo.service" || die "Failed to install foo.service"`)
+		require.Contains(t, content, `newins "bar.service" "bar-custom.service" || die "Failed to install bar.service"`)
+	})
 }
 
 func TestGentooUseFlagsIncludesInstallConditions(t *testing.T) {
@@ -1692,7 +1785,7 @@ func TestEbuildData(t *testing.T) {
 		data := ebuildData{
 			Description: "foo",
 			License:     "MIT",
-			Installers:  []installItemData{{InstallerCmd: "dosym", Source: "foo"}},
+			Plan:        &installPlan{Body: []installStmt{actionStmt{Op: OpDosym, Source: "foo"}}},
 		}
 		require.EqualError(t, data.Validate(), "dosym requires a destination")
 	})
@@ -1701,7 +1794,7 @@ func TestEbuildData(t *testing.T) {
 		data := ebuildData{
 			Description: "foo",
 			License:     "MIT",
-			Installers:  []installItemData{{InstallerCmd: "dosym", Source: "foo", Target: "bar"}},
+			Plan:        &installPlan{Body: []installStmt{actionStmt{Op: OpDosym, Source: "foo", Target: "bar"}}},
 		}
 		require.NoError(t, data.Validate())
 	})
@@ -2452,8 +2545,8 @@ func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
 		require.NoError(t, err)
 		str := string(content)
 
-		require.Contains(t, str, "if use amd64; then\n    exeinto /opt/bin\n    doexe \"dir_amd64/myapp\" || die \"Failed to install dir_amd64/myapp\"\n  fi")
-		require.Contains(t, str, "if use arm64; then\n    exeinto /opt/bin\n    doexe \"dir_arm64/myapp\" || die \"Failed to install dir_arm64/myapp\"\n  fi")
+		require.Contains(t, str, "if use amd64; then\n    exeinto /opt/bin\n    newexe \"dir_amd64/myapp\" \"myapp\" || die \"Failed to install dir_amd64/myapp\"\n  fi")
+		require.Contains(t, str, "if use arm64; then\n    exeinto /opt/bin\n    newexe \"dir_arm64/myapp\" \"myapp\" || die \"Failed to install dir_arm64/myapp\"\n  fi")
 	})
 
 	t.Run("plain src stays literal even with wrappedIn archive", func(t *testing.T) {
@@ -2493,7 +2586,7 @@ func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
 		require.NoError(t, err)
 		str := string(content)
 
-		require.Contains(t, str, `doexe "special/foo"`)
+		require.Contains(t, str, `newexe "special/foo" "foo"`)
 		require.NotContains(t, str, `doexe "myapp-1.0.0/special/foo"`)
 	})
 }
@@ -3010,8 +3103,8 @@ func TestGentooArchSuppressionPrecedence(t *testing.T) {
 
 		// Fallback binary 'doexe "myapp"' is generated ONLY for arm
 		require.Contains(t, str, "if use arm; then\n    doexe \"myapp\" || die \"Failed to install binary\"\n  fi")
-		require.Contains(t, str, "if use amd64; then\n    exeinto /opt/bin\n    newexe \"myapp\" \"foo-amd64\" || die \"Failed to install myapp\"\n  fi")
-		require.Contains(t, str, "if use arm64; then\n    exeinto /opt/bin\n    newexe \"myapp\" \"foo-arm64\" || die \"Failed to install myapp\"\n  fi")
+		require.Contains(t, str, "if use amd64; then\n    newexe \"myapp\" \"foo-amd64\" || die \"Failed to install myapp\"\n  fi")
+		require.Contains(t, str, "if use arm64; then\n    newexe \"myapp\" \"foo-arm64\" || die \"Failed to install myapp\"\n  fi")
 	})
 
 	t.Run("arch-specific entry followed by global entry suppresses fallback on all architectures", func(t *testing.T) {

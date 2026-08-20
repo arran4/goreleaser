@@ -27,12 +27,6 @@ var ebuildTemplate string
 //go:embed templates/md5-cache.tmpl
 var metaCacheTemplate string
 
-type installData struct {
-	Source   string
-	Target   string
-	Keywords []string
-}
-
 type archItem struct {
 	File string
 	URI  string
@@ -43,40 +37,46 @@ type archData struct {
 	URIs    []archItem
 }
 
-type installGroup struct {
-	Keywords []string
-	Installs []installData
+type installItemData struct {
+	Source      string
+	Target      string
+	Dir         string
+	Base        string
+	Use         []string
+	Keywords    []string
+	Section     string
+	StateFamily StateFamily
 }
 
-type installItemData struct {
-	Source           string
-	Target           string
-	Dir              string
-	Base             string
-	Use              []string
-	Keywords         []string
-	InstallerCmd     string
-	InstallRenameCmd string
-	DirSwitchCmd     string
+func (d installItemData) Validate() error {
+	if d.Section == "" {
+		return errors.New("section is required")
+	}
+	if d.Source == "" {
+		return errors.New("source is required")
+	}
+	isRename := d.Source != d.Base && d.Section != "dosym"
+	op := resolveInstallOp(d.Section, isRename)
+	desc := op.Descriptor()
+	if desc.ArgMode == ArgModeRename && d.Base == "" {
+		return fmt.Errorf("%s requires a destination base name", op)
+	}
+	return nil
 }
 
 type ebuildData struct {
-	Name          string
-	Description   string
-	Homepage      string
-	License       string
-	Keywords      string
-	Bindir        string
-	ExtraInstall  string
-	Archs         []archData
-	InstallGroups []installGroup
-	UseFlags      []config.GentooUseFlag
-	Dodir         []string
-	Dodoc         []string
-	Doman         []string
-	Systemd       []installItemData
-	Eclasses      []string
-	Installers    []installItemData
+	Name         string
+	Description  string
+	Homepage     string
+	License      string
+	Keywords     string
+	Bindir       string
+	ExtraInstall string
+	Archs        []archData
+	UseFlags     []config.GentooUseFlag
+	Systemd      []installItemData
+	Eclasses     []string
+	Plan         *installPlan
 }
 
 func (d ebuildData) Validate() error {
@@ -86,13 +86,8 @@ func (d ebuildData) Validate() error {
 	if strings.TrimSpace(d.License) == "" {
 		return errors.New("gentoo license is required and cannot be empty")
 	}
-	for _, sym := range d.Installers {
-		if sym.InstallerCmd != "dosym" {
-			continue
-		}
-		if sym.Target == "" {
-			return errors.New("dosym requires a destination")
-		}
+	if d.Plan != nil {
+		return d.Plan.Validate()
 	}
 	return nil
 }
@@ -107,6 +102,13 @@ func shellEscape(s string) string {
 	s = strings.ReplaceAll(s, `$`, `\$`)
 	s = strings.ReplaceAll(s, "`", "\\`")
 	return s
+}
+
+func (d ebuildData) InstallScript(indent string) string {
+	if d.Plan == nil {
+		return ""
+	}
+	return d.Plan.String(indent)
 }
 
 func (d ebuildData) RenderEbuild() (string, error) {
@@ -278,8 +280,76 @@ func (v *extraFilesProcessor) validate(name, src string) error {
 	return nil
 }
 
+func decomposeDestination(sectionName, src, dst, defaultDir string) (StateFamily, string, string, error) {
+	op := resolveSectionOp(sectionName)
+	return op.Descriptor().DecomposeDestination(src, dst, defaultDir)
+}
+
+func lowerInstallItemsFromConfig(sectionName string, cfgItems []config.GentooInstallItem, defaultDir string) ([]installItemData, error) {
+	var items []installItemData
+	for _, d := range cfgItems {
+		if d.Src == "" {
+			return nil, fmt.Errorf("gentoo %s: src is required", sectionName)
+		}
+		var keywords []string
+		for _, arch := range d.Archs {
+			kw, err := gentooArch(arch)
+			if err != nil {
+				return nil, fmt.Errorf("gentoo %s: %w", sectionName, err)
+			}
+			keywords = append(keywords, kw)
+		}
+		slices.Sort(keywords)
+		keywords = slices.Compact(keywords)
+
+		family, dir, base, err := decomposeDestination(sectionName, d.Src, d.Dst, defaultDir)
+		if err != nil {
+			return nil, err
+		}
+		item := installItemData{
+			Source:      d.Src,
+			Target:      d.Dst,
+			Dir:         dir,
+			Base:        base,
+			Use:         d.Use,
+			Keywords:    keywords,
+			Section:     sectionName,
+			StateFamily: family,
+		}
+		if err := item.Validate(); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func (v *extraFilesProcessor) decomposeItemDestination(sectionName, src, dst, defaultDir string) (string, StateFamily, string, string, error) {
+	if sectionName == "systemd" {
+		hasSystemdEclass := slices.Contains(v.cfg.Eclasses, "systemd")
+		if dst == "" {
+			if hasSystemdEclass {
+				return "systemd", StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+			}
+			return "doins", StateFamilyIns, "/usr/lib/systemd/system", path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if hasSystemdEclass && (dir == "." || dir == "" || dir == "/usr/lib/systemd/system" || dir == "usr/lib/systemd/system") {
+			return "systemd", StateFamilyNone, "", base, nil
+		}
+		targetDir := dir
+		if targetDir == "." || targetDir == "" {
+			targetDir = "/usr/lib/systemd/system"
+		}
+		return "doins", StateFamilyIns, targetDir, base, nil
+	}
+	family, dir, base, err := decomposeDestination(sectionName, src, dst, defaultDir)
+	return sectionName, family, dir, base, err
+}
+
 func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []config.GentooInstallItem, defaultDir string) ([]installItemData, error) {
-	var installerCmd, installRenameCmd, dirSwitchCmd string
 	var items []installItemData
 	for _, d := range cfgItems {
 		if d.Src == "" && d.SrcID == "" {
@@ -350,42 +420,20 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 					srcPath = path.Join(firstWrappedIn, d.Src)
 				}
 				target := d.Dst
-				dir := path.Dir(filepath.ToSlash(d.Dst))
-				base := path.Base(filepath.ToSlash(d.Dst))
-				if dir == "." || dir == "" {
-					dir = ""
-				}
-				if base == "." || base == "" {
-					base = path.Base(filepath.ToSlash(srcPath))
-				}
-
-				installerCmd = sectionName
-				installRenameCmd = "new" + strings.TrimPrefix(sectionName, "do")
-				dirSwitchCmd = ""
-				switch sectionName {
-				case "systemd":
-					installerCmd = "systemd_dounit"
-					installRenameCmd = "systemd_newunit"
-				case "dosym":
-					installerCmd = "dosym"
-					installRenameCmd = "dosym"
-				case "doins", "doexe":
-					dirSwitchCmd = strings.TrimPrefix(sectionName, "do") + "into"
-					if dir == "" {
-						dir = defaultDir
-					}
+				sec, stateFamily, stateDir, base, err := v.decomposeItemDestination(sectionName, srcPath, d.Dst, defaultDir)
+				if err != nil {
+					return nil, err
 				}
 
 				items = append(items, installItemData{
-					Source:           srcPath,
-					Target:           target,
-					Dir:              dir,
-					Base:             base,
-					Use:              d.Use,
-					Keywords:         keywords,
-					InstallerCmd:     installerCmd,
-					InstallRenameCmd: installRenameCmd,
-					DirSwitchCmd:     dirSwitchCmd,
+					Source:      srcPath,
+					Target:      target,
+					Dir:         stateDir,
+					Base:        base,
+					Use:         d.Use,
+					Keywords:    keywords,
+					Section:     sec,
+					StateFamily: stateFamily,
 				})
 			} else {
 				bins := firstBins
@@ -401,48 +449,20 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 						sourcePath = path.Join(firstWrappedIn, b)
 					}
 					target := d.Dst
-					var dir, base string
-					if d.Dst == "" {
-						dir = ""
-						base = b
-					} else {
-						cleanedDst := filepath.ToSlash(d.Dst)
-						if path.Dir(cleanedDst) == "." || path.Dir(cleanedDst) == "" {
-							dir = ""
-							base = cleanedDst
-						} else {
-							dir = path.Dir(cleanedDst)
-							base = path.Base(cleanedDst)
-						}
-					}
-
-					installerCmd = sectionName
-					installRenameCmd = "new" + strings.TrimPrefix(sectionName, "do")
-					dirSwitchCmd = ""
-					switch sectionName {
-					case "systemd":
-						installerCmd = "systemd_dounit"
-						installRenameCmd = "systemd_newunit"
-					case "dosym":
-						installerCmd = "dosym"
-						installRenameCmd = "dosym"
-					case "doins", "doexe":
-						dirSwitchCmd = strings.TrimPrefix(sectionName, "do") + "into"
-						if dir == "" {
-							dir = defaultDir
-						}
+					sec, stateFamily, stateDir, base, err := v.decomposeItemDestination(sectionName, sourcePath, d.Dst, defaultDir)
+					if err != nil {
+						return nil, err
 					}
 
 					items = append(items, installItemData{
-						Source:           sourcePath,
-						Target:           target,
-						Dir:              dir,
-						Base:             base,
-						Use:              d.Use,
-						Keywords:         keywords,
-						InstallerCmd:     installerCmd,
-						InstallRenameCmd: installRenameCmd,
-						DirSwitchCmd:     dirSwitchCmd,
+						Source:      sourcePath,
+						Target:      target,
+						Dir:         stateDir,
+						Base:        base,
+						Use:         d.Use,
+						Keywords:    keywords,
+						Section:     sec,
+						StateFamily: stateFamily,
 					})
 				}
 			}
@@ -454,42 +474,20 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 			src = "${FILESDIR}/" + strings.TrimPrefix(d.Src, "files/")
 		}
 
-		dir := path.Dir(filepath.ToSlash(d.Dst))
-		base := path.Base(filepath.ToSlash(d.Dst))
-		if dir == "." || dir == "" {
-			dir = ""
-		}
-		if base == "." || base == "" {
-			base = path.Base(filepath.ToSlash(src))
-		}
-
-		installerCmd = sectionName
-		installRenameCmd = "new" + strings.TrimPrefix(sectionName, "do")
-		dirSwitchCmd = ""
-		switch sectionName {
-		case "systemd":
-			installerCmd = "systemd_dounit"
-			installRenameCmd = "systemd_newunit"
-		case "dosym":
-			installerCmd = "dosym"
-			installRenameCmd = "dosym"
-		case "doins", "doexe":
-			dirSwitchCmd = strings.TrimPrefix(sectionName, "do") + "into"
-			if dir == "" {
-				dir = defaultDir
-			}
+		sec, stateFamily, stateDir, base, err := v.decomposeItemDestination(sectionName, src, d.Dst, defaultDir)
+		if err != nil {
+			return nil, err
 		}
 
 		items = append(items, installItemData{
-			Source:           src,
-			Target:           d.Dst,
-			Dir:              dir,
-			Base:             base,
-			Use:              d.Use,
-			Keywords:         keywords,
-			InstallerCmd:     installerCmd,
-			InstallRenameCmd: installRenameCmd,
-			DirSwitchCmd:     dirSwitchCmd,
+			Source:      src,
+			Target:      d.Dst,
+			Dir:         stateDir,
+			Base:        base,
+			Use:         d.Use,
+			Keywords:    keywords,
+			Section:     sec,
+			StateFamily: stateFamily,
 		})
 	}
 	return items, nil
