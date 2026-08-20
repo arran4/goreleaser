@@ -1110,7 +1110,7 @@ func buildInstallPlan(
 
 	for _, inst := range installers {
 		var condBody []installStmt
-		if inst.StateFamily != StateFamilyNone {
+		if inst.StateFamily != StateFamilyNone && inst.Dir != "" {
 			condBody = append(condBody, stateStmt{
 				Family: inst.StateFamily,
 				Value:  inst.Dir,

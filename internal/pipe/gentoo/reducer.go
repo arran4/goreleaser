@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -16,6 +18,93 @@ const (
 	StateFamilyIns  StateFamily = "insinto"
 	StateFamilyBin  StateFamily = "into"
 	StateFamilyDoc  StateFamily = "docinto"
+)
+
+type StateFamilyDescriptor struct {
+	Family                      StateFamily
+	Command                     string
+	HasKnownInitialState        bool
+	DefaultState                string
+	RequiresStateInitialization bool
+}
+
+func (f StateFamily) Descriptor() StateFamilyDescriptor {
+	switch f {
+	case StateFamilyExe:
+		return StateFamilyDescriptor{
+			Family:                      StateFamilyExe,
+			Command:                     "exeinto",
+			HasKnownInitialState:        false,
+			DefaultState:                "",
+			RequiresStateInitialization: true,
+		}
+	case StateFamilyIns:
+		return StateFamilyDescriptor{
+			Family:                      StateFamilyIns,
+			Command:                     "insinto",
+			HasKnownInitialState:        false,
+			DefaultState:                "",
+			RequiresStateInitialization: true,
+		}
+	case StateFamilyBin:
+		return StateFamilyDescriptor{
+			Family:                      StateFamilyBin,
+			Command:                     "into",
+			HasKnownInitialState:        true,
+			DefaultState:                "/usr",
+			RequiresStateInitialization: false,
+		}
+	case StateFamilyDoc:
+		return StateFamilyDescriptor{
+			Family:                      StateFamilyDoc,
+			Command:                     "docinto",
+			HasKnownInitialState:        true,
+			DefaultState:                "",
+			RequiresStateInitialization: false,
+		}
+	default:
+		return StateFamilyDescriptor{
+			Family:                      StateFamilyNone,
+			Command:                     "",
+			HasKnownInitialState:        false,
+			DefaultState:                "",
+			RequiresStateInitialization: false,
+		}
+	}
+}
+
+func InitialState() map[StateFamily]string {
+	state := make(map[StateFamily]string)
+	for _, f := range []StateFamily{StateFamilyBin, StateFamilyDoc} {
+		desc := f.Descriptor()
+		if desc.HasKnownInitialState {
+			state[f] = desc.DefaultState
+		}
+	}
+	return state
+}
+
+type ArgMode int
+
+const (
+	ArgModeSingle ArgMode = iota
+	ArgModeRename
+	ArgModeTwoArgs
+)
+
+type DestinationMode int
+
+const (
+	DestinationModeNone DestinationMode = iota
+	DestinationModeIntoBin
+	DestinationModeIntoSbin
+	DestinationModeExe
+	DestinationModeIns
+	DestinationModeDoc
+	DestinationModeFixed
+	DestinationModeMan
+	DestinationModeSymlink
+	DestinationModeDir
 )
 
 type InstallOp string
@@ -48,131 +137,564 @@ const (
 )
 
 type OpDescriptor struct {
-	Command      string
-	IsRename     bool
-	StateFamily  StateFamily
-	TakesTwoArgs bool
+	Op      InstallOp
+	Command string
+
+	// arguments / rename semantics
+	ArgMode        ArgMode
+	SupportsRename bool
+	RenameOp       InstallOp
+	IsRename       bool
+
+	// destination state semantics
+	StateFamily                 StateFamily
+	RequiresStateInitialization bool
+	DefaultState                string
+	HasKnownInitialState        bool
+
+	// destination interpretation
+	DestinationMode DestinationMode
+	FixedDir        string
+	ValidFixedDirs  []string
+
+	// error handling
+	AppendDie bool
+}
+
+func (d OpDescriptor) TakesTwoArgs() bool {
+	return d.ArgMode == ArgModeRename || d.ArgMode == ArgModeTwoArgs
+}
+
+func (d OpDescriptor) DecomposeDestination(src, dst, defaultDir string) (StateFamily, string, string, error) {
+	switch d.DestinationMode {
+	case DestinationModeIntoBin:
+		if dst == "" {
+			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir == "." || dir == "" {
+			return StateFamilyNone, "", base, nil
+		}
+		var root string
+		switch {
+		case dir == "bin" || dir == "/bin":
+			root = "/"
+		case strings.HasSuffix(dir, "/bin"):
+			root, _ = strings.CutSuffix(dir, "/bin")
+			if root == "" {
+				root = "/"
+			}
+		default:
+			return StateFamilyNone, "", "", fmt.Errorf("gentoo %s: destination %q is incompatible with %s; directory must end in /bin", d.Command, dst, d.Command)
+		}
+		return StateFamilyBin, root, base, nil
+
+	case DestinationModeIntoSbin:
+		if dst == "" {
+			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir == "." || dir == "" {
+			return StateFamilyNone, "", base, nil
+		}
+		var root string
+		switch {
+		case dir == "sbin" || dir == "/sbin":
+			root = "/"
+		case strings.HasSuffix(dir, "/sbin"):
+			root, _ = strings.CutSuffix(dir, "/sbin")
+			if root == "" {
+				root = "/"
+			}
+		default:
+			return StateFamilyNone, "", "", fmt.Errorf("gentoo %s: destination %q is incompatible with %s; directory must end in /sbin", d.Command, dst, d.Command)
+		}
+		return StateFamilyBin, root, base, nil
+
+	case DestinationModeExe:
+		if dst == "" {
+			return StateFamilyExe, defaultDir, path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir == "." || dir == "" {
+			dir = defaultDir
+		}
+		return StateFamilyExe, dir, base, nil
+
+	case DestinationModeIns:
+		if dst == "" {
+			return StateFamilyIns, defaultDir, path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir == "." || dir == "" {
+			dir = defaultDir
+		}
+		return StateFamilyIns, dir, base, nil
+
+	case DestinationModeDoc:
+		if dst == "" {
+			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir == "." || dir == "" {
+			return StateFamilyNone, "", base, nil
+		}
+		docDir := strings.TrimPrefix(dir, "/")
+		return StateFamilyDoc, docDir, base, nil
+
+	case DestinationModeFixed:
+		if dst == "" {
+			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir == "." || dir == "" {
+			return StateFamilyNone, "", base, nil
+		}
+		matched := false
+		for _, validDir := range d.ValidFixedDirs {
+			if dir == validDir {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return StateFamilyNone, "", "", fmt.Errorf("gentoo %s: destination %q is incompatible with %s; expected %s/<name>", d.Command, dst, d.Command, d.FixedDir)
+		}
+		return StateFamilyNone, "", base, nil
+
+	case DestinationModeMan:
+		if dst == "" {
+			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if dir != "." && dir != "" {
+			trimmed := strings.TrimPrefix(dir, "/")
+			if !strings.HasPrefix(trimmed, "usr/share/man/man") && !strings.HasPrefix(trimmed, "share/man/man") {
+				return StateFamilyNone, "", "", fmt.Errorf("gentoo %s: destination %q is incompatible with %s; expected /usr/share/man/manX/<name>", d.Command, dst, d.Command)
+			}
+		}
+		return StateFamilyNone, "", base, nil
+
+	case DestinationModeSymlink, DestinationModeDir:
+		return StateFamilyNone, "", dst, nil
+
+	default:
+		return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+	}
 }
 
 func (op InstallOp) Descriptor() OpDescriptor {
 	switch op {
 	case OpDoexe:
-		return OpDescriptor{Command: "doexe", IsRename: false, StateFamily: StateFamilyExe}
+		return OpDescriptor{
+			Op:                          OpDoexe,
+			Command:                     "doexe",
+			ArgMode:                     ArgModeSingle,
+			SupportsRename:              true,
+			RenameOp:                    OpNewexe,
+			StateFamily:                 StateFamilyExe,
+			RequiresStateInitialization: true,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeExe,
+			AppendDie:                   true,
+		}
 	case OpNewexe:
-		return OpDescriptor{Command: "newexe", IsRename: true, StateFamily: StateFamilyExe, TakesTwoArgs: true}
+		return OpDescriptor{
+			Op:                          OpNewexe,
+			Command:                     "newexe",
+			ArgMode:                     ArgModeRename,
+			IsRename:                    true,
+			StateFamily:                 StateFamilyExe,
+			RequiresStateInitialization: true,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeExe,
+			AppendDie:                   true,
+		}
 	case OpDoins:
-		return OpDescriptor{Command: "doins", IsRename: false, StateFamily: StateFamilyIns}
+		return OpDescriptor{
+			Op:                          OpDoins,
+			Command:                     "doins",
+			ArgMode:                     ArgModeSingle,
+			SupportsRename:              true,
+			RenameOp:                    OpNewins,
+			StateFamily:                 StateFamilyIns,
+			RequiresStateInitialization: true,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeIns,
+			AppendDie:                   true,
+		}
 	case OpNewins:
-		return OpDescriptor{Command: "newins", IsRename: true, StateFamily: StateFamilyIns, TakesTwoArgs: true}
+		return OpDescriptor{
+			Op:                          OpNewins,
+			Command:                     "newins",
+			ArgMode:                     ArgModeRename,
+			IsRename:                    true,
+			StateFamily:                 StateFamilyIns,
+			RequiresStateInitialization: true,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeIns,
+			AppendDie:                   true,
+		}
 	case OpDobin:
-		return OpDescriptor{Command: "dobin", IsRename: false, StateFamily: StateFamilyBin}
+		return OpDescriptor{
+			Op:                          OpDobin,
+			Command:                     "dobin",
+			ArgMode:                     ArgModeSingle,
+			SupportsRename:              true,
+			RenameOp:                    OpNewbin,
+			StateFamily:                 StateFamilyBin,
+			RequiresStateInitialization: false,
+			DefaultState:                "/usr",
+			HasKnownInitialState:        true,
+			DestinationMode:             DestinationModeIntoBin,
+			AppendDie:                   true,
+		}
 	case OpNewbin:
-		return OpDescriptor{Command: "newbin", IsRename: true, StateFamily: StateFamilyBin, TakesTwoArgs: true}
+		return OpDescriptor{
+			Op:                          OpNewbin,
+			Command:                     "newbin",
+			ArgMode:                     ArgModeRename,
+			IsRename:                    true,
+			StateFamily:                 StateFamilyBin,
+			RequiresStateInitialization: false,
+			DefaultState:                "/usr",
+			HasKnownInitialState:        true,
+			DestinationMode:             DestinationModeIntoBin,
+			AppendDie:                   true,
+		}
 	case OpDosbin:
-		return OpDescriptor{Command: "dosbin", IsRename: false, StateFamily: StateFamilyBin}
+		return OpDescriptor{
+			Op:                          OpDosbin,
+			Command:                     "dosbin",
+			ArgMode:                     ArgModeSingle,
+			SupportsRename:              true,
+			RenameOp:                    OpNewsbin,
+			StateFamily:                 StateFamilyBin,
+			RequiresStateInitialization: false,
+			DefaultState:                "/usr",
+			HasKnownInitialState:        true,
+			DestinationMode:             DestinationModeIntoSbin,
+			AppendDie:                   true,
+		}
 	case OpNewsbin:
-		return OpDescriptor{Command: "newsbin", IsRename: true, StateFamily: StateFamilyBin, TakesTwoArgs: true}
+		return OpDescriptor{
+			Op:                          OpNewsbin,
+			Command:                     "newsbin",
+			ArgMode:                     ArgModeRename,
+			IsRename:                    true,
+			StateFamily:                 StateFamilyBin,
+			RequiresStateInitialization: false,
+			DefaultState:                "/usr",
+			HasKnownInitialState:        true,
+			DestinationMode:             DestinationModeIntoSbin,
+			AppendDie:                   true,
+		}
 	case OpDoconfd:
-		return OpDescriptor{Command: "doconfd", IsRename: false, StateFamily: StateFamilyNone}
+		return OpDescriptor{
+			Op:                          OpDoconfd,
+			Command:                     "doconfd",
+			ArgMode:                     ArgModeSingle,
+			SupportsRename:              true,
+			RenameOp:                    OpNewconfd,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeFixed,
+			FixedDir:                    "/etc/conf.d",
+			ValidFixedDirs:              []string{"/etc/conf.d", "etc/conf.d"},
+			AppendDie:                   true,
+		}
 	case OpNewconfd:
-		return OpDescriptor{Command: "newconfd", IsRename: true, StateFamily: StateFamilyNone, TakesTwoArgs: true}
+		return OpDescriptor{
+			Op:                          OpNewconfd,
+			Command:                     "newconfd",
+			ArgMode:                     ArgModeRename,
+			IsRename:                    true,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeFixed,
+			FixedDir:                    "/etc/conf.d",
+			ValidFixedDirs:              []string{"/etc/conf.d", "etc/conf.d"},
+			AppendDie:                   true,
+		}
 	case OpDoenvd:
-		return OpDescriptor{Command: "doenvd", IsRename: false, StateFamily: StateFamilyNone}
+		return OpDescriptor{
+			Op:                          OpDoenvd,
+			Command:                     "doenvd",
+			ArgMode:                     ArgModeSingle,
+			SupportsRename:              true,
+			RenameOp:                    OpNewenvd,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeFixed,
+			FixedDir:                    "/etc/env.d",
+			ValidFixedDirs:              []string{"/etc/env.d", "etc/env.d"},
+			AppendDie:                   true,
+		}
 	case OpNewenvd:
-		return OpDescriptor{Command: "newenvd", IsRename: true, StateFamily: StateFamilyNone, TakesTwoArgs: true}
+		return OpDescriptor{
+			Op:                          OpNewenvd,
+			Command:                     "newenvd",
+			ArgMode:                     ArgModeRename,
+			IsRename:                    true,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeFixed,
+			FixedDir:                    "/etc/env.d",
+			ValidFixedDirs:              []string{"/etc/env.d", "etc/env.d"},
+			AppendDie:                   true,
+		}
 	case OpDoheader:
-		return OpDescriptor{Command: "doheader", IsRename: false, StateFamily: StateFamilyNone}
+		return OpDescriptor{
+			Op:                          OpDoheader,
+			Command:                     "doheader",
+			ArgMode:                     ArgModeSingle,
+			SupportsRename:              true,
+			RenameOp:                    OpNewheader,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeFixed,
+			FixedDir:                    "/usr/include",
+			ValidFixedDirs:              []string{"/usr/include", "usr/include"},
+			AppendDie:                   true,
+		}
 	case OpNewheader:
-		return OpDescriptor{Command: "newheader", IsRename: true, StateFamily: StateFamilyNone, TakesTwoArgs: true}
+		return OpDescriptor{
+			Op:                          OpNewheader,
+			Command:                     "newheader",
+			ArgMode:                     ArgModeRename,
+			IsRename:                    true,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeFixed,
+			FixedDir:                    "/usr/include",
+			ValidFixedDirs:              []string{"/usr/include", "usr/include"},
+			AppendDie:                   true,
+		}
 	case OpDoinitd:
-		return OpDescriptor{Command: "doinitd", IsRename: false, StateFamily: StateFamilyNone}
+		return OpDescriptor{
+			Op:                          OpDoinitd,
+			Command:                     "doinitd",
+			ArgMode:                     ArgModeSingle,
+			SupportsRename:              true,
+			RenameOp:                    OpNewinitd,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeFixed,
+			FixedDir:                    "/etc/init.d",
+			ValidFixedDirs:              []string{"/etc/init.d", "etc/init.d"},
+			AppendDie:                   true,
+		}
 	case OpNewinitd:
-		return OpDescriptor{Command: "newinitd", IsRename: true, StateFamily: StateFamilyNone, TakesTwoArgs: true}
+		return OpDescriptor{
+			Op:                          OpNewinitd,
+			Command:                     "newinitd",
+			ArgMode:                     ArgModeRename,
+			IsRename:                    true,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeFixed,
+			FixedDir:                    "/etc/init.d",
+			ValidFixedDirs:              []string{"/etc/init.d", "etc/init.d"},
+			AppendDie:                   true,
+		}
 	case OpSystemdDounit:
-		return OpDescriptor{Command: "systemd_dounit", IsRename: false, StateFamily: StateFamilyNone}
+		return OpDescriptor{
+			Op:                          OpSystemdDounit,
+			Command:                     "systemd_dounit",
+			ArgMode:                     ArgModeSingle,
+			SupportsRename:              true,
+			RenameOp:                    OpSystemdNewunit,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeFixed,
+			FixedDir:                    "/usr/lib/systemd/system",
+			ValidFixedDirs:              []string{"/usr/lib/systemd/system", "usr/lib/systemd/system", "/lib/systemd/system", "lib/systemd/system"},
+			AppendDie:                   true,
+		}
 	case OpSystemdNewunit:
-		return OpDescriptor{Command: "systemd_newunit", IsRename: true, StateFamily: StateFamilyNone, TakesTwoArgs: true}
+		return OpDescriptor{
+			Op:                          OpSystemdNewunit,
+			Command:                     "systemd_newunit",
+			ArgMode:                     ArgModeRename,
+			IsRename:                    true,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeFixed,
+			FixedDir:                    "/usr/lib/systemd/system",
+			ValidFixedDirs:              []string{"/usr/lib/systemd/system", "usr/lib/systemd/system", "/lib/systemd/system", "lib/systemd/system"},
+			AppendDie:                   true,
+		}
 	case OpDosym:
-		return OpDescriptor{Command: "dosym", IsRename: false, StateFamily: StateFamilyNone, TakesTwoArgs: true}
+		return OpDescriptor{
+			Op:                          OpDosym,
+			Command:                     "dosym",
+			ArgMode:                     ArgModeTwoArgs,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeSymlink,
+			AppendDie:                   true,
+		}
 	case OpDodoc:
-		return OpDescriptor{Command: "dodoc", IsRename: false, StateFamily: StateFamilyDoc}
+		return OpDescriptor{
+			Op:                          OpDodoc,
+			Command:                     "dodoc",
+			ArgMode:                     ArgModeSingle,
+			SupportsRename:              true,
+			RenameOp:                    OpNewdoc,
+			StateFamily:                 StateFamilyDoc,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        true,
+			DestinationMode:             DestinationModeDoc,
+			AppendDie:                   true,
+		}
 	case OpNewdoc:
-		return OpDescriptor{Command: "newdoc", IsRename: true, StateFamily: StateFamilyDoc, TakesTwoArgs: true}
+		return OpDescriptor{
+			Op:                          OpNewdoc,
+			Command:                     "newdoc",
+			ArgMode:                     ArgModeRename,
+			IsRename:                    true,
+			StateFamily:                 StateFamilyDoc,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        true,
+			DestinationMode:             DestinationModeDoc,
+			AppendDie:                   true,
+		}
 	case OpDoman:
-		return OpDescriptor{Command: "doman", IsRename: false, StateFamily: StateFamilyNone}
+		return OpDescriptor{
+			Op:                          OpDoman,
+			Command:                     "doman",
+			ArgMode:                     ArgModeSingle,
+			SupportsRename:              true,
+			RenameOp:                    OpNewman,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeMan,
+			AppendDie:                   true,
+		}
 	case OpNewman:
-		return OpDescriptor{Command: "newman", IsRename: true, StateFamily: StateFamilyNone, TakesTwoArgs: true}
+		return OpDescriptor{
+			Op:                          OpNewman,
+			Command:                     "newman",
+			ArgMode:                     ArgModeRename,
+			IsRename:                    true,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeMan,
+			AppendDie:                   true,
+		}
 	case OpDodir:
-		return OpDescriptor{Command: "dodir", IsRename: false, StateFamily: StateFamilyNone}
+		return OpDescriptor{
+			Op:                          OpDodir,
+			Command:                     "dodir",
+			ArgMode:                     ArgModeSingle,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeDir,
+			AppendDie:                   true,
+		}
 	default:
-		return OpDescriptor{Command: string(op), IsRename: false, StateFamily: StateFamilyNone}
+		return OpDescriptor{
+			Op:                          op,
+			Command:                     string(op),
+			ArgMode:                     ArgModeSingle,
+			StateFamily:                 StateFamilyNone,
+			RequiresStateInitialization: false,
+			DefaultState:                "",
+			HasKnownInitialState:        false,
+			DestinationMode:             DestinationModeNone,
+			AppendDie:                   true,
+		}
 	}
 }
 
-func resolveInstallOp(section string, isRename bool) InstallOp {
+func resolveSectionOp(section string) InstallOp {
 	switch section {
-	case "doexe":
-		if isRename {
-			return OpNewexe
-		}
-		return OpDoexe
-	case "doins":
-		if isRename {
-			return OpNewins
-		}
-		return OpDoins
 	case "dobin":
-		if isRename {
-			return OpNewbin
-		}
 		return OpDobin
 	case "dosbin":
-		if isRename {
-			return OpNewsbin
-		}
 		return OpDosbin
+	case "doexe":
+		return OpDoexe
+	case "doins":
+		return OpDoins
 	case "doconfd":
-		if isRename {
-			return OpNewconfd
-		}
 		return OpDoconfd
 	case "doenvd":
-		if isRename {
-			return OpNewenvd
-		}
 		return OpDoenvd
 	case "doheader":
-		if isRename {
-			return OpNewheader
-		}
 		return OpDoheader
 	case "doinitd":
-		if isRename {
-			return OpNewinitd
-		}
 		return OpDoinitd
 	case "systemd":
-		if isRename {
-			return OpSystemdNewunit
-		}
 		return OpSystemdDounit
 	case "dosym":
 		return OpDosym
 	case "dodoc":
-		if isRename {
-			return OpNewdoc
-		}
 		return OpDodoc
 	case "doman":
-		if isRename {
-			return OpNewman
-		}
 		return OpDoman
 	case "dodir":
 		return OpDodir
 	default:
 		return InstallOp(section)
 	}
+}
+
+func resolveInstallOp(section string, isRename bool) InstallOp {
+	baseOp := resolveSectionOp(section)
+	desc := baseOp.Descriptor()
+	if isRename && desc.SupportsRename && desc.RenameOp != "" {
+		return desc.RenameOp
+	}
+	return baseOp
 }
 
 type installStmt interface {
@@ -193,11 +715,9 @@ func (s stateStmt) String(indent string) string {
 	var sb strings.Builder
 	sb.WriteString(indent)
 	sb.WriteString(string(s.Family))
-	if s.Value != "" && s.Value != "/" {
+	if s.Value != "" {
 		sb.WriteString(" ")
 		sb.WriteString(s.Value)
-	} else if s.Value == "/" {
-		sb.WriteString(" /")
 	}
 	sb.WriteString("\n")
 	return sb.String()
@@ -206,6 +726,10 @@ func (s stateStmt) String(indent string) string {
 func (s stateStmt) Validate() error {
 	if s.Family == "" {
 		return errors.New("stateStmt requires a state family")
+	}
+	desc := s.Family.Descriptor()
+	if desc.RequiresStateInitialization && s.Value == "" {
+		return fmt.Errorf("stateStmt %s requires a directory value", s.Family)
 	}
 	return nil
 }
@@ -233,13 +757,13 @@ func (a actionStmt) String(indent string) string {
 	sb.WriteString(a.Source)
 	sb.WriteString("\"")
 
-	if desc.TakesTwoArgs && a.Target != "" {
+	if desc.TakesTwoArgs() && a.Target != "" {
 		sb.WriteString(" \"")
 		sb.WriteString(a.Target)
 		sb.WriteString("\"")
 	}
 
-	if a.Die != "" {
+	if desc.AppendDie && a.Die != "" {
 		sb.WriteString(" || die \"")
 		sb.WriteString(a.Die)
 		sb.WriteString("\"")
@@ -249,10 +773,11 @@ func (a actionStmt) String(indent string) string {
 }
 
 func (a actionStmt) Validate() error {
+	desc := a.Op.Descriptor()
 	if a.Op == OpDosym && a.Target == "" {
 		return errors.New("dosym requires a destination")
 	}
-	if a.Op.Descriptor().IsRename && a.Target == "" {
+	if desc.IsRename && a.Target == "" {
 		return fmt.Errorf("%s requires a destination", a.Op)
 	}
 	return nil
@@ -852,7 +1377,7 @@ func (p *installPlan) reducePlan() *installPlan {
 	current := p
 	const maxIterations = 100
 	for range maxIterations {
-		initialState := make(map[StateFamily]string)
+		initialState := InitialState()
 		next := &installPlan{
 			UniverseArchitectures: current.UniverseArchitectures,
 			Body:                  reduceStmts(current.Body, current.UniverseArchitectures, initialState),
@@ -943,8 +1468,13 @@ func reduceStmts(stmts []installStmt, universe []string, state map[StateFamily]s
 			}
 
 		case stateStmt:
+			desc := s.Family.Descriptor()
 			if val, ok := state[s.Family]; ok && val == s.Value {
 				continue // redundant
+			}
+			if _, ok := state[s.Family]; !ok && desc.HasKnownInitialState && desc.DefaultState == s.Value {
+				state[s.Family] = s.Value
+				continue // redundant with Portage initial state
 			}
 			state[s.Family] = s.Value
 			reduced = append(reduced, s)

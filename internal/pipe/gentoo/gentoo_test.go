@@ -812,7 +812,7 @@ func TestTemplateScenarios(t *testing.T) {
 			installers: []installItemData{
 				{Section: "doexe", StateFamily: StateFamilyExe, Source: "custom_bin", Target: "/opt/custom/custom_bin", Dir: "/opt/custom", Base: "custom_bin"},
 				{Section: "doexe", StateFamily: StateFamilyExe, Source: "renamed_bin_x86", Target: "/opt/other/renamed_bin", Dir: "/opt/other", Base: "renamed_bin", Keywords: []string{"amd64"}},
-				{Section: "doexe", StateFamily: StateFamilyExe, Source: "default_bin", Target: "", Dir: "", Base: ""},
+				{Section: "doexe", StateFamily: StateFamilyExe, Source: "default_bin", Target: "", Dir: "/opt/bin", Base: "default_bin"},
 			},
 		},
 	}

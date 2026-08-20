@@ -20,6 +20,6 @@ src_install() {
     exeinto /opt/other
     newexe "renamed_bin_x86" "renamed_bin" || die "Failed to install renamed_bin_x86"
   fi
-  exeinto
-  newexe "default_bin" || die "Failed to install default_bin"
+  exeinto /opt/bin
+  doexe "default_bin" || die "Failed to install default_bin"
 }
