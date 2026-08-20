@@ -2,7 +2,6 @@
 package redact
 
 import (
-	"cmp"
 	"io"
 	"slices"
 	"strings"
@@ -51,10 +50,10 @@ func redact(env []string) *strings.Replacer {
 		}
 	}
 	slices.SortFunc(secrets, func(a, b kv) int {
-		if c := cmp.Compare(len(b.v), len(a.v)); c != 0 {
-			return c
+		if len(b.v) != len(a.v) {
+			return len(b.v) - len(a.v)
 		}
-		return cmp.Compare(a.k, b.k)
+		return strings.Compare(a.k, b.k)
 	})
 	oldnew := make([]string, 0, len(secrets)*2)
 	for _, e := range secrets {
