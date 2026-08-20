@@ -334,7 +334,7 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		return err
 	}
 
-	installers := append(append(append(append(append(append(append(append(append([]installItemData{}, dobin...), doconfd...), doenvd...), doexe...), doheader...), doinitd...), doins...), dosbin...), dosym...)
+	installers := append(append(append(append(append(append(append(append(append(append([]installItemData{}, dobin...), doconfd...), doenvd...), doexe...), doheader...), doinitd...), doins...), dosbin...), dosym...), systemd...)
 
 	var eclasses []string
 	for _, e := range cfg.Eclasses {
@@ -354,23 +354,6 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 		UseFlags:     useFlags,
 		Systemd:      systemd,
 		Eclasses:     eclasses,
-	}
-
-	if !slices.Contains(eclasses, "systemd") && len(data.Systemd) > 0 {
-		for _, item := range data.Systemd {
-			targetDir := item.Dir
-			if targetDir == "" {
-				targetDir = "/usr/lib/systemd/system"
-			}
-			item.Dir = targetDir
-			item.StateFamily = StateFamilyIns
-			item.Section = "doins"
-			installers = append(installers, item)
-		}
-		data.Systemd = nil
-	} else if len(data.Systemd) > 0 {
-		installers = append(installers, data.Systemd...)
-		data.Systemd = nil
 	}
 
 	data.Plan = buildInstallPlan(

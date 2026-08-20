@@ -574,7 +574,7 @@ func (op InstallOp) Descriptor() OpDescriptor {
 			HasKnownInitialState:        false,
 			DestinationMode:             DestinationModeFixed,
 			FixedDir:                    "/usr/lib/systemd/system",
-			ValidFixedDirs:              []string{"/usr/lib/systemd/system", "usr/lib/systemd/system", "/lib/systemd/system", "lib/systemd/system"},
+			ValidFixedDirs:              []string{"/usr/lib/systemd/system", "usr/lib/systemd/system"},
 			AppendDie:                   true,
 		}
 	case OpSystemdNewunit:
@@ -589,7 +589,7 @@ func (op InstallOp) Descriptor() OpDescriptor {
 			HasKnownInitialState:        false,
 			DestinationMode:             DestinationModeFixed,
 			FixedDir:                    "/usr/lib/systemd/system",
-			ValidFixedDirs:              []string{"/usr/lib/systemd/system", "usr/lib/systemd/system", "/lib/systemd/system", "lib/systemd/system"},
+			ValidFixedDirs:              []string{"/usr/lib/systemd/system", "usr/lib/systemd/system"},
 			AppendDie:                   true,
 		}
 	case OpDosym:

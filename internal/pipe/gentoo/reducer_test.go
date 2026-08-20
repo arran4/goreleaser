@@ -886,7 +886,7 @@ func TestOpDescriptors(t *testing.T) {
 			expectedRenameOp:       OpSystemdNewunit,
 			expectedDestMode:       DestinationModeFixed,
 			expectedFixedDir:       "/usr/lib/systemd/system",
-			expectedValidFixedDirs: []string{"/usr/lib/systemd/system", "usr/lib/systemd/system", "/lib/systemd/system", "lib/systemd/system"},
+			expectedValidFixedDirs: []string{"/usr/lib/systemd/system", "usr/lib/systemd/system"},
 			expectedAppendDie:      true,
 		},
 		{
@@ -896,7 +896,7 @@ func TestOpDescriptors(t *testing.T) {
 			expectedIsRename:       true,
 			expectedDestMode:       DestinationModeFixed,
 			expectedFixedDir:       "/usr/lib/systemd/system",
-			expectedValidFixedDirs: []string{"/usr/lib/systemd/system", "usr/lib/systemd/system", "/lib/systemd/system", "lib/systemd/system"},
+			expectedValidFixedDirs: []string{"/usr/lib/systemd/system", "usr/lib/systemd/system"},
 			expectedAppendDie:      true,
 		},
 		{
@@ -1747,6 +1747,14 @@ func TestDecomposeDestination(t *testing.T) {
 			dst:         "/etc/systemd/system/foo.service",
 			expectErr:   true,
 			errContains: "incompatible with systemd",
+		},
+		{
+			name:        "fixed-destination helper incompatible directory (systemd with /lib)",
+			section:     "systemd",
+			src:         "foo.service",
+			dst:         "/lib/systemd/system/foo.service",
+			expectErr:   true,
+			errContains: "incompatible with systemd_dounit",
 		},
 		{
 			name:        "dobin incompatible directory",

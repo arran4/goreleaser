@@ -883,7 +883,7 @@ func TestDoRunWithSystemdAndUseFlags(t *testing.T) {
 }
 
 func TestDoRunWithSystemdEclass(t *testing.T) {
-	t.Run("with systemd eclass uses systemd helpers", func(t *testing.T) {
+	t.Run("with systemd eclass uses systemd helpers for default and canonical rename", func(t *testing.T) {
 		dist := t.TempDir()
 		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
 			Dist:        dist,
@@ -921,7 +921,7 @@ func TestDoRunWithSystemdEclass(t *testing.T) {
 		require.Contains(t, content, `systemd_newunit "bar.service" "bar-custom.service" || die "Failed to install bar.service"`)
 	})
 
-	t.Run("without systemd eclass preserves custom lib systemd path in fallback", func(t *testing.T) {
+	t.Run("with systemd eclass lowers explicit /lib to doins and newins", func(t *testing.T) {
 		dist := t.TempDir()
 		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
 			Dist:        dist,
@@ -930,8 +930,10 @@ func TestDoRunWithSystemdEclass(t *testing.T) {
 				Repository: config.RepoRef{Name: "overlay"},
 				Bin:        true,
 				License:    "MIT",
+				Eclasses:   []string{"systemd"},
 				Systemd: []config.GentooInstallItem{
 					{Src: "foo.service", Dst: "/lib/systemd/system/foo.service"},
+					{Src: "bar.service", Dst: "/lib/systemd/system/bar-custom.service"},
 				},
 			}},
 		}, testctx.WithVersion("1.0.0"))
@@ -955,6 +957,83 @@ func TestDoRunWithSystemdEclass(t *testing.T) {
 		content := string(bts)
 		require.Contains(t, content, `insinto /lib/systemd/system`)
 		require.Contains(t, content, `doins "foo.service" || die "Failed to install foo.service"`)
+		require.Contains(t, content, `newins "bar.service" "bar-custom.service" || die "Failed to install bar.service"`)
+		require.NotContains(t, content, `systemd_dounit`)
+		require.NotContains(t, content, `systemd_newunit`)
+	})
+
+	t.Run("without systemd eclass lowers default to /usr/lib/systemd/system doins", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "foo",
+			Gentoos: []config.Gentoo{{
+				Repository: config.RepoRef{Name: "overlay"},
+				Bin:        true,
+				License:    "MIT",
+				Systemd: []config.GentooInstallItem{
+					{Src: "foo.service"},
+				},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "foo_1.0.0_linux_amd64.tar.gz",
+			Path:   "amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+		})
+
+		cli := client.NewMock()
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], cli))
+
+		ebuild := filepath.Join(dist, "gentoo", "default", "app-misc", "foo-bin", "foo-bin-1.0.0.ebuild")
+		bts, err := os.ReadFile(ebuild)
+		require.NoError(t, err)
+
+		content := string(bts)
+		require.Contains(t, content, `insinto /usr/lib/systemd/system`)
+		require.Contains(t, content, `doins "foo.service" || die "Failed to install foo.service"`)
+	})
+
+	t.Run("without systemd eclass preserves custom lib systemd path in fallback with doins and newins", func(t *testing.T) {
+		dist := t.TempDir()
+		ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+			Dist:        dist,
+			ProjectName: "foo",
+			Gentoos: []config.Gentoo{{
+				Repository: config.RepoRef{Name: "overlay"},
+				Bin:        true,
+				License:    "MIT",
+				Systemd: []config.GentooInstallItem{
+					{Src: "foo.service", Dst: "/lib/systemd/system/foo.service"},
+					{Src: "bar.service", Dst: "/lib/systemd/system/bar-custom.service"},
+				},
+			}},
+		}, testctx.WithVersion("1.0.0"))
+
+		ctx.Artifacts.Add(&artifact.Artifact{
+			Name:   "foo_1.0.0_linux_amd64.tar.gz",
+			Path:   "amd64.tar.gz",
+			Goos:   "linux",
+			Goarch: "amd64",
+			Type:   artifact.UploadableArchive,
+		})
+
+		cli := client.NewMock()
+		require.NoError(t, Pipe{}.Default(ctx))
+		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], cli))
+
+		ebuild := filepath.Join(dist, "gentoo", "default", "app-misc", "foo-bin", "foo-bin-1.0.0.ebuild")
+		bts, err := os.ReadFile(ebuild)
+		require.NoError(t, err)
+
+		content := string(bts)
+		require.Contains(t, content, `insinto /lib/systemd/system`)
+		require.Contains(t, content, `doins "foo.service" || die "Failed to install foo.service"`)
+		require.Contains(t, content, `newins "bar.service" "bar-custom.service" || die "Failed to install bar.service"`)
 	})
 }
 

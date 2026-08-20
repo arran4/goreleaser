@@ -324,6 +324,31 @@ func lowerInstallItemsFromConfig(sectionName string, cfgItems []config.GentooIns
 	return items, nil
 }
 
+func (v *extraFilesProcessor) decomposeItemDestination(sectionName, src, dst, defaultDir string) (string, StateFamily, string, string, error) {
+	if sectionName == "systemd" {
+		hasSystemdEclass := slices.Contains(v.cfg.Eclasses, "systemd")
+		if dst == "" {
+			if hasSystemdEclass {
+				return "systemd", StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+			}
+			return "doins", StateFamilyIns, "/usr/lib/systemd/system", path.Base(filepath.ToSlash(src)), nil
+		}
+		cleanedDst := path.Clean(filepath.ToSlash(dst))
+		dir := path.Dir(cleanedDst)
+		base := path.Base(cleanedDst)
+		if hasSystemdEclass && (dir == "." || dir == "" || dir == "/usr/lib/systemd/system" || dir == "usr/lib/systemd/system") {
+			return "systemd", StateFamilyNone, "", base, nil
+		}
+		targetDir := dir
+		if targetDir == "." || targetDir == "" {
+			targetDir = "/usr/lib/systemd/system"
+		}
+		return "doins", StateFamilyIns, targetDir, base, nil
+	}
+	family, dir, base, err := decomposeDestination(sectionName, src, dst, defaultDir)
+	return sectionName, family, dir, base, err
+}
+
 func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []config.GentooInstallItem, defaultDir string) ([]installItemData, error) {
 	var items []installItemData
 	for _, d := range cfgItems {
@@ -395,7 +420,7 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 					srcPath = path.Join(firstWrappedIn, d.Src)
 				}
 				target := d.Dst
-				stateFamily, stateDir, base, err := decomposeDestination(sectionName, srcPath, d.Dst, defaultDir)
+				sec, stateFamily, stateDir, base, err := v.decomposeItemDestination(sectionName, srcPath, d.Dst, defaultDir)
 				if err != nil {
 					return nil, err
 				}
@@ -407,7 +432,7 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 					Base:        base,
 					Use:         d.Use,
 					Keywords:    keywords,
-					Section:     sectionName,
+					Section:     sec,
 					StateFamily: stateFamily,
 				})
 			} else {
@@ -424,7 +449,7 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 						sourcePath = path.Join(firstWrappedIn, b)
 					}
 					target := d.Dst
-					stateFamily, stateDir, base, err := decomposeDestination(sectionName, sourcePath, d.Dst, defaultDir)
+					sec, stateFamily, stateDir, base, err := v.decomposeItemDestination(sectionName, sourcePath, d.Dst, defaultDir)
 					if err != nil {
 						return nil, err
 					}
@@ -436,7 +461,7 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 						Base:        base,
 						Use:         d.Use,
 						Keywords:    keywords,
-						Section:     sectionName,
+						Section:     sec,
 						StateFamily: stateFamily,
 					})
 				}
@@ -449,7 +474,7 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 			src = "${FILESDIR}/" + strings.TrimPrefix(d.Src, "files/")
 		}
 
-		stateFamily, stateDir, base, err := decomposeDestination(sectionName, src, d.Dst, defaultDir)
+		sec, stateFamily, stateDir, base, err := v.decomposeItemDestination(sectionName, src, d.Dst, defaultDir)
 		if err != nil {
 			return nil, err
 		}
@@ -461,7 +486,7 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 			Base:        base,
 			Use:         d.Use,
 			Keywords:    keywords,
-			Section:     sectionName,
+			Section:     sec,
 			StateFamily: stateFamily,
 		})
 	}
