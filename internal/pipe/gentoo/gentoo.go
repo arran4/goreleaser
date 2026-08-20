@@ -358,7 +358,11 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 
 	if !slices.Contains(eclasses, "systemd") && len(data.Systemd) > 0 {
 		for _, item := range data.Systemd {
-			item.Dir = "/usr/lib/systemd/system"
+			targetDir := item.Dir
+			if targetDir == "" {
+				targetDir = "/usr/lib/systemd/system"
+			}
+			item.Dir = targetDir
 			item.StateFamily = StateFamilyIns
 			item.Section = "doins"
 			installers = append(installers, item)
@@ -1090,10 +1094,11 @@ func buildInstallPlan(
 					target = inst.Target
 				}
 				body = append(body, actionStmt{
-					Op:     op,
-					Source: inst.Source,
-					Target: target,
-					Die:    dieMsg,
+					Op:            op,
+					Source:        inst.Source,
+					Target:        target,
+					Die:           dieMsg,
+					RequiredState: StateRequirement{Family: StateFamilyExe, Value: bindir},
 				})
 			}
 
@@ -1129,10 +1134,11 @@ func buildInstallPlan(
 		}
 
 		condBody = append(condBody, actionStmt{
-			Op:     op,
-			Source: inst.Source,
-			Target: target,
-			Die:    dieMsg,
+			Op:            op,
+			Source:        inst.Source,
+			Target:        target,
+			Die:           dieMsg,
+			RequiredState: StateRequirement{Family: inst.StateFamily, Value: inst.Dir},
 		})
 
 		if len(inst.Keywords) > 0 || len(inst.Use) > 0 {
@@ -1147,14 +1153,16 @@ func buildInstallPlan(
 
 	for _, man := range doman {
 		stmts = append(stmts, actionStmt{
-			Op:     OpDoman,
-			Source: man,
+			Op:            OpDoman,
+			Source:        man,
+			RequiredState: StateRequirement{Family: StateFamilyNone},
 		})
 	}
 	for _, doc := range dodoc {
 		stmts = append(stmts, actionStmt{
-			Op:     OpDodoc,
-			Source: doc,
+			Op:            OpDodoc,
+			Source:        doc,
+			RequiredState: StateRequirement{Family: StateFamilyDoc, Value: ""},
 		})
 	}
 

@@ -43,7 +43,7 @@ func (f StateFamily) Descriptor() StateFamilyDescriptor {
 			Family:                      StateFamilyIns,
 			Command:                     "insinto",
 			HasKnownInitialState:        false,
-			DefaultState:                "",
+			DefaultState:                "/",
 			RequiresStateInitialization: true,
 		}
 	case StateFamilyBin:
@@ -82,6 +82,11 @@ func InitialState() map[StateFamily]string {
 		}
 	}
 	return state
+}
+
+type StateRequirement struct {
+	Family StateFamily
+	Value  string
 }
 
 type ArgMode int
@@ -169,13 +174,13 @@ func (d OpDescriptor) DecomposeDestination(src, dst, defaultDir string) (StateFa
 	switch d.DestinationMode {
 	case DestinationModeIntoBin:
 		if dst == "" {
-			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+			return StateFamilyBin, "/usr", path.Base(filepath.ToSlash(src)), nil
 		}
 		cleanedDst := path.Clean(filepath.ToSlash(dst))
 		dir := path.Dir(cleanedDst)
 		base := path.Base(cleanedDst)
 		if dir == "." || dir == "" {
-			return StateFamilyNone, "", base, nil
+			return StateFamilyBin, "/usr", base, nil
 		}
 		var root string
 		switch {
@@ -193,13 +198,13 @@ func (d OpDescriptor) DecomposeDestination(src, dst, defaultDir string) (StateFa
 
 	case DestinationModeIntoSbin:
 		if dst == "" {
-			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+			return StateFamilyBin, "/usr", path.Base(filepath.ToSlash(src)), nil
 		}
 		cleanedDst := path.Clean(filepath.ToSlash(dst))
 		dir := path.Dir(cleanedDst)
 		base := path.Base(cleanedDst)
 		if dir == "." || dir == "" {
-			return StateFamilyNone, "", base, nil
+			return StateFamilyBin, "/usr", base, nil
 		}
 		var root string
 		switch {
@@ -216,40 +221,45 @@ func (d OpDescriptor) DecomposeDestination(src, dst, defaultDir string) (StateFa
 		return StateFamilyBin, root, base, nil
 
 	case DestinationModeExe:
+		dirVal := defaultDir
 		if dst == "" {
-			return StateFamilyExe, defaultDir, path.Base(filepath.ToSlash(src)), nil
+			return StateFamilyExe, dirVal, path.Base(filepath.ToSlash(src)), nil
 		}
 		cleanedDst := path.Clean(filepath.ToSlash(dst))
 		dir := path.Dir(cleanedDst)
 		base := path.Base(cleanedDst)
-		if dir == "." || dir == "" {
-			dir = defaultDir
+		if dir != "." && dir != "" {
+			dirVal = dir
 		}
-		return StateFamilyExe, dir, base, nil
+		return StateFamilyExe, dirVal, base, nil
 
 	case DestinationModeIns:
+		dirVal := defaultDir
+		if dirVal == "" {
+			dirVal = "/"
+		}
 		if dst == "" {
-			return StateFamilyIns, defaultDir, path.Base(filepath.ToSlash(src)), nil
+			return StateFamilyIns, dirVal, path.Base(filepath.ToSlash(src)), nil
 		}
 		cleanedDst := path.Clean(filepath.ToSlash(dst))
 		dir := path.Dir(cleanedDst)
 		base := path.Base(cleanedDst)
-		if dir == "." || dir == "" {
-			dir = defaultDir
+		if dir != "." && dir != "" {
+			dirVal = dir
 		}
-		return StateFamilyIns, dir, base, nil
+		return StateFamilyIns, dirVal, base, nil
 
 	case DestinationModeDoc:
 		if dst == "" {
-			return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
+			return StateFamilyDoc, "", path.Base(filepath.ToSlash(src)), nil
 		}
 		cleanedDst := path.Clean(filepath.ToSlash(dst))
 		dir := path.Dir(cleanedDst)
 		base := path.Base(cleanedDst)
-		if dir == "." || dir == "" {
-			return StateFamilyNone, "", base, nil
+		docDir := ""
+		if dir != "." && dir != "" {
+			docDir = strings.TrimPrefix(dir, "/")
 		}
-		docDir := strings.TrimPrefix(dir, "/")
 		return StateFamilyDoc, docDir, base, nil
 
 	case DestinationModeFixed:
@@ -262,17 +272,10 @@ func (d OpDescriptor) DecomposeDestination(src, dst, defaultDir string) (StateFa
 		if dir == "." || dir == "" {
 			return StateFamilyNone, "", base, nil
 		}
-		matched := false
-		for _, validDir := range d.ValidFixedDirs {
-			if dir == validDir {
-				matched = true
-				break
-			}
-		}
-		if !matched {
+		if !slices.Contains(d.ValidFixedDirs, dir) {
 			return StateFamilyNone, "", "", fmt.Errorf("gentoo %s: destination %q is incompatible with %s; expected %s/<name>", d.Command, dst, d.Command, d.FixedDir)
 		}
-		return StateFamilyNone, "", base, nil
+		return StateFamilyNone, dir, base, nil
 
 	case DestinationModeMan:
 		if dst == "" {
@@ -335,7 +338,7 @@ func (op InstallOp) Descriptor() OpDescriptor {
 			RenameOp:                    OpNewins,
 			StateFamily:                 StateFamilyIns,
 			RequiresStateInitialization: true,
-			DefaultState:                "",
+			DefaultState:                "/",
 			HasKnownInitialState:        false,
 			DestinationMode:             DestinationModeIns,
 			AppendDie:                   true,
@@ -348,7 +351,7 @@ func (op InstallOp) Descriptor() OpDescriptor {
 			IsRename:                    true,
 			StateFamily:                 StateFamilyIns,
 			RequiresStateInitialization: true,
-			DefaultState:                "",
+			DefaultState:                "/",
 			HasKnownInitialState:        false,
 			DestinationMode:             DestinationModeIns,
 			AppendDie:                   true,
@@ -586,7 +589,7 @@ func (op InstallOp) Descriptor() OpDescriptor {
 			DefaultState:                "",
 			HasKnownInitialState:        true,
 			DestinationMode:             DestinationModeDoc,
-			AppendDie:                   true,
+			AppendDie:                   false,
 		}
 	case OpNewdoc:
 		return OpDescriptor{
@@ -599,7 +602,7 @@ func (op InstallOp) Descriptor() OpDescriptor {
 			DefaultState:                "",
 			HasKnownInitialState:        true,
 			DestinationMode:             DestinationModeDoc,
-			AppendDie:                   true,
+			AppendDie:                   false,
 		}
 	case OpDoman:
 		return OpDescriptor{
@@ -613,7 +616,7 @@ func (op InstallOp) Descriptor() OpDescriptor {
 			DefaultState:                "",
 			HasKnownInitialState:        false,
 			DestinationMode:             DestinationModeMan,
-			AppendDie:                   true,
+			AppendDie:                   false,
 		}
 	case OpNewman:
 		return OpDescriptor{
@@ -626,7 +629,7 @@ func (op InstallOp) Descriptor() OpDescriptor {
 			DefaultState:                "",
 			HasKnownInitialState:        false,
 			DestinationMode:             DestinationModeMan,
-			AppendDie:                   true,
+			AppendDie:                   false,
 		}
 	case OpDodir:
 		return OpDescriptor{
@@ -638,7 +641,7 @@ func (op InstallOp) Descriptor() OpDescriptor {
 			DefaultState:                "",
 			HasKnownInitialState:        false,
 			DestinationMode:             DestinationModeDir,
-			AppendDie:                   true,
+			AppendDie:                   false,
 		}
 	default:
 		return OpDescriptor{
@@ -740,10 +743,11 @@ func (s stateStmt) Equals(other installStmt) bool {
 }
 
 type actionStmt struct {
-	Op     InstallOp
-	Source string
-	Target string
-	Die    string
+	Op            InstallOp
+	Source        string
+	Target        string
+	Die           string
+	RequiredState StateRequirement
 }
 
 func (a actionStmt) isInstallStmt() {}
@@ -763,9 +767,17 @@ func (a actionStmt) String(indent string) string {
 		sb.WriteString("\"")
 	}
 
-	if desc.AppendDie && a.Die != "" {
+	if desc.AppendDie {
+		dieMsg := a.Die
+		if dieMsg == "" {
+			if a.Target != "" {
+				dieMsg = "Failed to install " + a.Target
+			} else {
+				dieMsg = "Failed to install " + a.Source
+			}
+		}
 		sb.WriteString(" || die \"")
-		sb.WriteString(a.Die)
+		sb.WriteString(dieMsg)
 		sb.WriteString("\"")
 	}
 	sb.WriteString("\n")
@@ -774,18 +786,24 @@ func (a actionStmt) String(indent string) string {
 
 func (a actionStmt) Validate() error {
 	desc := a.Op.Descriptor()
+	if a.Source == "" {
+		return fmt.Errorf("%s requires a source argument", desc.Command)
+	}
 	if a.Op == OpDosym && a.Target == "" {
 		return errors.New("dosym requires a destination")
 	}
 	if desc.IsRename && a.Target == "" {
 		return fmt.Errorf("%s requires a destination", a.Op)
 	}
+	if desc.ArgMode == ArgModeSingle && a.Target != "" {
+		return fmt.Errorf("%s does not accept a second argument", desc.Command)
+	}
 	return nil
 }
 
 func (a actionStmt) Equals(other installStmt) bool {
 	o, ok := other.(actionStmt)
-	return ok && a.Op == o.Op && a.Source == o.Source && a.Target == o.Target && a.Die == o.Die
+	return ok && a.Op == o.Op && a.Source == o.Source && a.Target == o.Target && a.Die == o.Die && a.RequiredState == o.RequiredState
 }
 
 type rawStmt struct {
@@ -1477,6 +1495,32 @@ func reduceStmts(stmts []installStmt, universe []string, state map[StateFamily]s
 				continue // redundant with Portage initial state
 			}
 			state[s.Family] = s.Value
+			reduced = append(reduced, s)
+
+		case actionStmt:
+			if s.RequiredState.Family != StateFamilyNone && s.RequiredState.Value != "" {
+				fam := s.RequiredState.Family
+				val := s.RequiredState.Value
+				currentVal, isSet := state[fam]
+				if !isSet || currentVal != val {
+					// State is not set to what this action requires. Emit state setter!
+					reduced = append(reduced, stateStmt{
+						Family: fam,
+						Value:  val,
+					})
+					state[fam] = val
+				}
+			} else if s.RequiredState.Family == StateFamilyDoc && s.RequiredState.Value == "" {
+				// docinto default reset
+				currentVal, isSet := state[StateFamilyDoc]
+				if isSet && currentVal != "" {
+					reduced = append(reduced, stateStmt{
+						Family: StateFamilyDoc,
+						Value:  "",
+					})
+					state[StateFamilyDoc] = ""
+				}
+			}
 			reduced = append(reduced, s)
 
 		default:

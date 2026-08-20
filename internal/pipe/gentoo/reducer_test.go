@@ -274,7 +274,7 @@ func TestUniversalArchSimplification(t *testing.T) {
 		reduced := plan.reducePlan()
 		require.Len(t, reduced.Body, 1)
 		require.IsType(t, actionStmt{}, reduced.Body[0])
-		require.Equal(t, "doexe \"app\"\n", reduced.Body[0].String(""))
+		require.Equal(t, "doexe \"app\" || die \"Failed to install app\"\n", reduced.Body[0].String(""))
 	})
 
 	t.Run("reducer removes negated universal arch condition block (False)", func(t *testing.T) {
@@ -320,7 +320,7 @@ func TestSemanticInstallOperations(t *testing.T) {
 		{
 			name:     "doexe",
 			stmt:     actionStmt{Op: OpDoexe, Source: "prog"},
-			expected: "doexe \"prog\"\n",
+			expected: "doexe \"prog\" || die \"Failed to install prog\"\n",
 		},
 		{
 			name:     "newexe",
@@ -330,77 +330,77 @@ func TestSemanticInstallOperations(t *testing.T) {
 		{
 			name:     "doins",
 			stmt:     actionStmt{Op: OpDoins, Source: "config.yaml"},
-			expected: "doins \"config.yaml\"\n",
+			expected: "doins \"config.yaml\" || die \"Failed to install config.yaml\"\n",
 		},
 		{
 			name:     "newins",
 			stmt:     actionStmt{Op: OpNewins, Source: "config.example", Target: "config.yaml"},
-			expected: "newins \"config.example\" \"config.yaml\"\n",
+			expected: "newins \"config.example\" \"config.yaml\" || die \"Failed to install config.yaml\"\n",
 		},
 		{
 			name:     "dobin",
 			stmt:     actionStmt{Op: OpDobin, Source: "bin/cli"},
-			expected: "dobin \"bin/cli\"\n",
+			expected: "dobin \"bin/cli\" || die \"Failed to install bin/cli\"\n",
 		},
 		{
 			name:     "newbin",
 			stmt:     actionStmt{Op: OpNewbin, Source: "bin/cli_v2", Target: "cli"},
-			expected: "newbin \"bin/cli_v2\" \"cli\"\n",
+			expected: "newbin \"bin/cli_v2\" \"cli\" || die \"Failed to install cli\"\n",
 		},
 		{
 			name:     "dosbin",
 			stmt:     actionStmt{Op: OpDosbin, Source: "sbin/daemon"},
-			expected: "dosbin \"sbin/daemon\"\n",
+			expected: "dosbin \"sbin/daemon\" || die \"Failed to install sbin/daemon\"\n",
 		},
 		{
 			name:     "newsbin",
 			stmt:     actionStmt{Op: OpNewsbin, Source: "sbin/daemon_v2", Target: "daemon"},
-			expected: "newsbin \"sbin/daemon_v2\" \"daemon\"\n",
+			expected: "newsbin \"sbin/daemon_v2\" \"daemon\" || die \"Failed to install daemon\"\n",
 		},
 		{
 			name:     "doconfd",
 			stmt:     actionStmt{Op: OpDoconfd, Source: "foo.confd"},
-			expected: "doconfd \"foo.confd\"\n",
+			expected: "doconfd \"foo.confd\" || die \"Failed to install foo.confd\"\n",
 		},
 		{
 			name:     "newconfd",
 			stmt:     actionStmt{Op: OpNewconfd, Source: "foo.confd", Target: "foo"},
-			expected: "newconfd \"foo.confd\" \"foo\"\n",
+			expected: "newconfd \"foo.confd\" \"foo\" || die \"Failed to install foo\"\n",
 		},
 		{
 			name:     "doenvd",
 			stmt:     actionStmt{Op: OpDoenvd, Source: "99foo"},
-			expected: "doenvd \"99foo\"\n",
+			expected: "doenvd \"99foo\" || die \"Failed to install 99foo\"\n",
 		},
 		{
 			name:     "newenvd",
 			stmt:     actionStmt{Op: OpNewenvd, Source: "99foo", Target: "99foo_renamed"},
-			expected: "newenvd \"99foo\" \"99foo_renamed\"\n",
+			expected: "newenvd \"99foo\" \"99foo_renamed\" || die \"Failed to install 99foo_renamed\"\n",
 		},
 		{
 			name:     "doheader",
 			stmt:     actionStmt{Op: OpDoheader, Source: "foo.h"},
-			expected: "doheader \"foo.h\"\n",
+			expected: "doheader \"foo.h\" || die \"Failed to install foo.h\"\n",
 		},
 		{
 			name:     "newheader",
 			stmt:     actionStmt{Op: OpNewheader, Source: "foo_impl.h", Target: "foo.h"},
-			expected: "newheader \"foo_impl.h\" \"foo.h\"\n",
+			expected: "newheader \"foo_impl.h\" \"foo.h\" || die \"Failed to install foo.h\"\n",
 		},
 		{
 			name:     "doinitd",
 			stmt:     actionStmt{Op: OpDoinitd, Source: "foo.initd"},
-			expected: "doinitd \"foo.initd\"\n",
+			expected: "doinitd \"foo.initd\" || die \"Failed to install foo.initd\"\n",
 		},
 		{
 			name:     "newinitd",
 			stmt:     actionStmt{Op: OpNewinitd, Source: "foo.initd", Target: "foo"},
-			expected: "newinitd \"foo.initd\" \"foo\"\n",
+			expected: "newinitd \"foo.initd\" \"foo\" || die \"Failed to install foo\"\n",
 		},
 		{
 			name:     "systemd_dounit",
 			stmt:     actionStmt{Op: OpSystemdDounit, Source: "foo.service"},
-			expected: "systemd_dounit \"foo.service\"\n",
+			expected: "systemd_dounit \"foo.service\" || die \"Failed to install foo.service\"\n",
 		},
 		{
 			name:     "systemd_newunit argument shape",
@@ -622,46 +622,46 @@ func TestDestinationStateModeling(t *testing.T) {
 
 func TestStateFamilyDescriptor(t *testing.T) {
 	testCases := []struct {
-		family                      StateFamily
-		expectedCommand             string
-		expectedHasKnownInitial     bool
-		expectedDefaultState        string
-		expectedRequiresInit        bool
+		family                  StateFamily
+		expectedCommand         string
+		expectedHasKnownInitial bool
+		expectedDefaultState    string
+		expectedRequiresInit    bool
 	}{
 		{
-			family:                      StateFamilyExe,
-			expectedCommand:             "exeinto",
-			expectedHasKnownInitial:     false,
-			expectedDefaultState:        "",
-			expectedRequiresInit:        true,
+			family:                  StateFamilyExe,
+			expectedCommand:         "exeinto",
+			expectedHasKnownInitial: false,
+			expectedDefaultState:    "",
+			expectedRequiresInit:    true,
 		},
 		{
-			family:                      StateFamilyIns,
-			expectedCommand:             "insinto",
-			expectedHasKnownInitial:     false,
-			expectedDefaultState:        "",
-			expectedRequiresInit:        true,
+			family:                  StateFamilyIns,
+			expectedCommand:         "insinto",
+			expectedHasKnownInitial: false,
+			expectedDefaultState:    "/",
+			expectedRequiresInit:    true,
 		},
 		{
-			family:                      StateFamilyBin,
-			expectedCommand:             "into",
-			expectedHasKnownInitial:     true,
-			expectedDefaultState:        "/usr",
-			expectedRequiresInit:        false,
+			family:                  StateFamilyBin,
+			expectedCommand:         "into",
+			expectedHasKnownInitial: true,
+			expectedDefaultState:    "/usr",
+			expectedRequiresInit:    false,
 		},
 		{
-			family:                      StateFamilyDoc,
-			expectedCommand:             "docinto",
-			expectedHasKnownInitial:     true,
-			expectedDefaultState:        "",
-			expectedRequiresInit:        false,
+			family:                  StateFamilyDoc,
+			expectedCommand:         "docinto",
+			expectedHasKnownInitial: true,
+			expectedDefaultState:    "",
+			expectedRequiresInit:    false,
 		},
 		{
-			family:                      StateFamilyNone,
-			expectedCommand:             "",
-			expectedHasKnownInitial:     false,
-			expectedDefaultState:        "",
-			expectedRequiresInit:        false,
+			family:                  StateFamilyNone,
+			expectedCommand:         "",
+			expectedHasKnownInitial: false,
+			expectedDefaultState:    "",
+			expectedRequiresInit:    false,
 		},
 	}
 
@@ -678,7 +678,7 @@ func TestStateFamilyDescriptor(t *testing.T) {
 	t.Run("InitialState map", func(t *testing.T) {
 		initial := InitialState()
 		require.Equal(t, "/usr", initial[StateFamilyBin])
-		require.Equal(t, "", initial[StateFamilyDoc])
+		require.Empty(t, initial[StateFamilyDoc])
 		_, hasExe := initial[StateFamilyExe]
 		require.False(t, hasExe)
 		_, hasIns := initial[StateFamilyIns]
@@ -688,158 +688,180 @@ func TestStateFamilyDescriptor(t *testing.T) {
 
 func TestOpDescriptors(t *testing.T) {
 	testCases := []struct {
-		op                          InstallOp
-		expectedCommand             string
-		expectedArgMode             ArgMode
-		expectedSupportsRename      bool
-		expectedRenameOp            InstallOp
-		expectedIsRename            bool
-		expectedStateFamily         StateFamily
-		expectedRequiresInit        bool
-		expectedDefaultState        string
-		expectedHasKnownInitial     bool
-		expectedDestMode            DestinationMode
-		expectedAppendDie           bool
+		op                      InstallOp
+		expectedCommand         string
+		expectedArgMode         ArgMode
+		expectedSupportsRename  bool
+		expectedRenameOp        InstallOp
+		expectedIsRename        bool
+		expectedStateFamily     StateFamily
+		expectedRequiresInit    bool
+		expectedDefaultState    string
+		expectedHasKnownInitial bool
+		expectedDestMode        DestinationMode
+		expectedAppendDie       bool
 	}{
 		{
-			op:                          OpDoexe,
-			expectedCommand:             "doexe",
-			expectedArgMode:             ArgModeSingle,
-			expectedSupportsRename:      true,
-			expectedRenameOp:            OpNewexe,
-			expectedStateFamily:         StateFamilyExe,
-			expectedRequiresInit:        true,
-			expectedDestMode:            DestinationModeExe,
-			expectedAppendDie:           true,
+			op:                     OpDoexe,
+			expectedCommand:        "doexe",
+			expectedArgMode:        ArgModeSingle,
+			expectedSupportsRename: true,
+			expectedRenameOp:       OpNewexe,
+			expectedStateFamily:    StateFamilyExe,
+			expectedRequiresInit:   true,
+			expectedDestMode:       DestinationModeExe,
+			expectedAppendDie:      true,
 		},
 		{
-			op:                          OpNewexe,
-			expectedCommand:             "newexe",
-			expectedArgMode:             ArgModeRename,
-			expectedIsRename:            true,
-			expectedStateFamily:         StateFamilyExe,
-			expectedRequiresInit:        true,
-			expectedDestMode:            DestinationModeExe,
-			expectedAppendDie:           true,
+			op:                   OpNewexe,
+			expectedCommand:      "newexe",
+			expectedArgMode:      ArgModeRename,
+			expectedIsRename:     true,
+			expectedStateFamily:  StateFamilyExe,
+			expectedRequiresInit: true,
+			expectedDestMode:     DestinationModeExe,
+			expectedAppendDie:    true,
 		},
 		{
-			op:                          OpDobin,
-			expectedCommand:             "dobin",
-			expectedArgMode:             ArgModeSingle,
-			expectedSupportsRename:      true,
-			expectedRenameOp:            OpNewbin,
-			expectedStateFamily:         StateFamilyBin,
-			expectedDefaultState:        "/usr",
-			expectedHasKnownInitial:     true,
-			expectedDestMode:            DestinationModeIntoBin,
-			expectedAppendDie:           true,
+			op:                      OpDobin,
+			expectedCommand:         "dobin",
+			expectedArgMode:         ArgModeSingle,
+			expectedSupportsRename:  true,
+			expectedRenameOp:        OpNewbin,
+			expectedStateFamily:     StateFamilyBin,
+			expectedDefaultState:    "/usr",
+			expectedHasKnownInitial: true,
+			expectedDestMode:        DestinationModeIntoBin,
+			expectedAppendDie:       true,
 		},
 		{
-			op:                          OpNewbin,
-			expectedCommand:             "newbin",
-			expectedArgMode:             ArgModeRename,
-			expectedIsRename:            true,
-			expectedStateFamily:         StateFamilyBin,
-			expectedDefaultState:        "/usr",
-			expectedHasKnownInitial:     true,
-			expectedDestMode:            DestinationModeIntoBin,
-			expectedAppendDie:           true,
+			op:                      OpNewbin,
+			expectedCommand:         "newbin",
+			expectedArgMode:         ArgModeRename,
+			expectedIsRename:        true,
+			expectedStateFamily:     StateFamilyBin,
+			expectedDefaultState:    "/usr",
+			expectedHasKnownInitial: true,
+			expectedDestMode:        DestinationModeIntoBin,
+			expectedAppendDie:       true,
 		},
 		{
-			op:                          OpDosbin,
-			expectedCommand:             "dosbin",
-			expectedArgMode:             ArgModeSingle,
-			expectedSupportsRename:      true,
-			expectedRenameOp:            OpNewsbin,
-			expectedStateFamily:         StateFamilyBin,
-			expectedDefaultState:        "/usr",
-			expectedHasKnownInitial:     true,
-			expectedDestMode:            DestinationModeIntoSbin,
-			expectedAppendDie:           true,
+			op:                      OpDosbin,
+			expectedCommand:         "dosbin",
+			expectedArgMode:         ArgModeSingle,
+			expectedSupportsRename:  true,
+			expectedRenameOp:        OpNewsbin,
+			expectedStateFamily:     StateFamilyBin,
+			expectedDefaultState:    "/usr",
+			expectedHasKnownInitial: true,
+			expectedDestMode:        DestinationModeIntoSbin,
+			expectedAppendDie:       true,
 		},
 		{
-			op:                          OpNewsbin,
-			expectedCommand:             "newsbin",
-			expectedArgMode:             ArgModeRename,
-			expectedIsRename:            true,
-			expectedStateFamily:         StateFamilyBin,
-			expectedDefaultState:        "/usr",
-			expectedHasKnownInitial:     true,
-			expectedDestMode:            DestinationModeIntoSbin,
-			expectedAppendDie:           true,
+			op:                      OpNewsbin,
+			expectedCommand:         "newsbin",
+			expectedArgMode:         ArgModeRename,
+			expectedIsRename:        true,
+			expectedStateFamily:     StateFamilyBin,
+			expectedDefaultState:    "/usr",
+			expectedHasKnownInitial: true,
+			expectedDestMode:        DestinationModeIntoSbin,
+			expectedAppendDie:       true,
 		},
 		{
-			op:                          OpDoins,
-			expectedCommand:             "doins",
-			expectedArgMode:             ArgModeSingle,
-			expectedSupportsRename:      true,
-			expectedRenameOp:            OpNewins,
-			expectedStateFamily:         StateFamilyIns,
-			expectedRequiresInit:        true,
-			expectedDestMode:            DestinationModeIns,
-			expectedAppendDie:           true,
+			op:                      OpDoins,
+			expectedCommand:         "doins",
+			expectedArgMode:         ArgModeSingle,
+			expectedSupportsRename:  true,
+			expectedRenameOp:        OpNewins,
+			expectedStateFamily:     StateFamilyIns,
+			expectedRequiresInit:    true,
+			expectedDefaultState:    "/",
+			expectedHasKnownInitial: false,
+			expectedDestMode:        DestinationModeIns,
+			expectedAppendDie:       true,
 		},
 		{
-			op:                          OpNewins,
-			expectedCommand:             "newins",
-			expectedArgMode:             ArgModeRename,
-			expectedIsRename:            true,
-			expectedStateFamily:         StateFamilyIns,
-			expectedRequiresInit:        true,
-			expectedDestMode:            DestinationModeIns,
-			expectedAppendDie:           true,
+			op:                      OpNewins,
+			expectedCommand:         "newins",
+			expectedArgMode:         ArgModeRename,
+			expectedIsRename:        true,
+			expectedStateFamily:     StateFamilyIns,
+			expectedRequiresInit:    true,
+			expectedDefaultState:    "/",
+			expectedHasKnownInitial: false,
+			expectedDestMode:        DestinationModeIns,
+			expectedAppendDie:       true,
 		},
 		{
-			op:                          OpDoconfd,
-			expectedCommand:             "doconfd",
-			expectedArgMode:             ArgModeSingle,
-			expectedSupportsRename:      true,
-			expectedRenameOp:            OpNewconfd,
-			expectedDestMode:            DestinationModeFixed,
-			expectedAppendDie:           true,
+			op:                     OpDoconfd,
+			expectedCommand:        "doconfd",
+			expectedArgMode:        ArgModeSingle,
+			expectedSupportsRename: true,
+			expectedRenameOp:       OpNewconfd,
+			expectedDestMode:       DestinationModeFixed,
+			expectedAppendDie:      true,
 		},
 		{
-			op:                          OpSystemdDounit,
-			expectedCommand:             "systemd_dounit",
-			expectedArgMode:             ArgModeSingle,
-			expectedSupportsRename:      true,
-			expectedRenameOp:            OpSystemdNewunit,
-			expectedDestMode:            DestinationModeFixed,
-			expectedAppendDie:           true,
+			op:                     OpSystemdDounit,
+			expectedCommand:        "systemd_dounit",
+			expectedArgMode:        ArgModeSingle,
+			expectedSupportsRename: true,
+			expectedRenameOp:       OpSystemdNewunit,
+			expectedDestMode:       DestinationModeFixed,
+			expectedAppendDie:      true,
 		},
 		{
-			op:                          OpDosym,
-			expectedCommand:             "dosym",
-			expectedArgMode:             ArgModeTwoArgs,
-			expectedDestMode:            DestinationModeSymlink,
-			expectedAppendDie:           true,
+			op:                OpDosym,
+			expectedCommand:   "dosym",
+			expectedArgMode:   ArgModeTwoArgs,
+			expectedDestMode:  DestinationModeSymlink,
+			expectedAppendDie: true,
 		},
 		{
-			op:                          OpDodoc,
-			expectedCommand:             "dodoc",
-			expectedArgMode:             ArgModeSingle,
-			expectedSupportsRename:      true,
-			expectedRenameOp:            OpNewdoc,
-			expectedStateFamily:         StateFamilyDoc,
-			expectedHasKnownInitial:     true,
-			expectedDestMode:            DestinationModeDoc,
-			expectedAppendDie:           true,
+			op:                      OpDodoc,
+			expectedCommand:         "dodoc",
+			expectedArgMode:         ArgModeSingle,
+			expectedSupportsRename:  true,
+			expectedRenameOp:        OpNewdoc,
+			expectedStateFamily:     StateFamilyDoc,
+			expectedHasKnownInitial: true,
+			expectedDestMode:        DestinationModeDoc,
+			expectedAppendDie:       false,
 		},
 		{
-			op:                          OpDoman,
-			expectedCommand:             "doman",
-			expectedArgMode:             ArgModeSingle,
-			expectedSupportsRename:      true,
-			expectedRenameOp:            OpNewman,
-			expectedDestMode:            DestinationModeMan,
-			expectedAppendDie:           true,
+			op:                      OpNewdoc,
+			expectedCommand:         "newdoc",
+			expectedArgMode:         ArgModeRename,
+			expectedIsRename:        true,
+			expectedStateFamily:     StateFamilyDoc,
+			expectedHasKnownInitial: true,
+			expectedDestMode:        DestinationModeDoc,
+			expectedAppendDie:       false,
 		},
 		{
-			op:                          OpDodir,
-			expectedCommand:             "dodir",
-			expectedArgMode:             ArgModeSingle,
-			expectedDestMode:            DestinationModeDir,
-			expectedAppendDie:           true,
+			op:                     OpDoman,
+			expectedCommand:        "doman",
+			expectedArgMode:        ArgModeSingle,
+			expectedSupportsRename: true,
+			expectedRenameOp:       OpNewman,
+			expectedDestMode:       DestinationModeMan,
+			expectedAppendDie:      false,
+		},
+		{
+			op:                OpNewman,
+			expectedCommand:   "newman",
+			expectedArgMode:   ArgModeRename,
+			expectedIsRename:  true,
+			expectedDestMode:  DestinationModeMan,
+			expectedAppendDie: false,
+		},
+		{
+			op:                OpDodir,
+			expectedCommand:   "dodir",
+			expectedArgMode:   ArgModeSingle,
+			expectedDestMode:  DestinationModeDir,
+			expectedAppendDie: false,
 		},
 	}
 
@@ -859,6 +881,162 @@ func TestOpDescriptors(t *testing.T) {
 			require.Equal(t, tc.expectedAppendDie, desc.AppendDie)
 		})
 	}
+}
+
+func TestStateResetAndRestoration(t *testing.T) {
+	t.Run("custom dobin -> default dobin", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				actionStmt{
+					Op:            OpDobin,
+					Source:        "custom",
+					RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr/local"},
+				},
+				actionStmt{
+					Op:            OpDobin,
+					Source:        "normal",
+					RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr"},
+				},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 4)
+		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/usr/local"}, reduced.Body[0])
+		require.Equal(t, actionStmt{Op: OpDobin, Source: "custom", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr/local"}}, reduced.Body[1])
+		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/usr"}, reduced.Body[2])
+		require.Equal(t, actionStmt{Op: OpDobin, Source: "normal", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr"}}, reduced.Body[3])
+	})
+
+	t.Run("custom dobin -> default dosbin", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				actionStmt{
+					Op:            OpDobin,
+					Source:        "custom",
+					RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr/local"},
+				},
+				actionStmt{
+					Op:            OpDosbin,
+					Source:        "normal",
+					RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr"},
+				},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 4)
+		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/usr/local"}, reduced.Body[0])
+		require.Equal(t, actionStmt{Op: OpDobin, Source: "custom", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr/local"}}, reduced.Body[1])
+		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/usr"}, reduced.Body[2])
+		require.Equal(t, actionStmt{Op: OpDosbin, Source: "normal", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr"}}, reduced.Body[3])
+	})
+
+	t.Run("custom dosbin -> default dobin", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				actionStmt{
+					Op:            OpDosbin,
+					Source:        "custom",
+					RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/opt/foo"},
+				},
+				actionStmt{
+					Op:            OpDobin,
+					Source:        "normal",
+					RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr"},
+				},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 4)
+		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/opt/foo"}, reduced.Body[0])
+		require.Equal(t, actionStmt{Op: OpDosbin, Source: "custom", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/opt/foo"}}, reduced.Body[1])
+		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/usr"}, reduced.Body[2])
+		require.Equal(t, actionStmt{Op: OpDobin, Source: "normal", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr"}}, reduced.Body[3])
+	})
+
+	t.Run("custom dosbin -> default dosbin", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				actionStmt{
+					Op:            OpDosbin,
+					Source:        "custom",
+					RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/opt/foo"},
+				},
+				actionStmt{
+					Op:            OpDosbin,
+					Source:        "normal",
+					RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr"},
+				},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 4)
+		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/opt/foo"}, reduced.Body[0])
+		require.Equal(t, actionStmt{Op: OpDosbin, Source: "custom", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/opt/foo"}}, reduced.Body[1])
+		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/usr"}, reduced.Body[2])
+		require.Equal(t, actionStmt{Op: OpDosbin, Source: "normal", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr"}}, reduced.Body[3])
+	})
+
+	t.Run("custom insinto -> default doins", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				actionStmt{
+					Op:            OpDoins,
+					Source:        "custom.conf",
+					RequiredState: StateRequirement{Family: StateFamilyIns, Value: "/etc/foo"},
+				},
+				actionStmt{
+					Op:            OpDoins,
+					Source:        "normal.yaml",
+					RequiredState: StateRequirement{Family: StateFamilyIns, Value: "/"},
+				},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 4)
+		require.Equal(t, stateStmt{Family: StateFamilyIns, Value: "/etc/foo"}, reduced.Body[0])
+		require.Equal(t, actionStmt{Op: OpDoins, Source: "custom.conf", RequiredState: StateRequirement{Family: StateFamilyIns, Value: "/etc/foo"}}, reduced.Body[1])
+		require.Equal(t, stateStmt{Family: StateFamilyIns, Value: "/"}, reduced.Body[2])
+		require.Equal(t, actionStmt{Op: OpDoins, Source: "normal.yaml", RequiredState: StateRequirement{Family: StateFamilyIns, Value: "/"}}, reduced.Body[3])
+	})
+
+	t.Run("custom docinto -> default dodoc", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				actionStmt{
+					Op:            OpDodoc,
+					Source:        "manual.html",
+					RequiredState: StateRequirement{Family: StateFamilyDoc, Value: "html"},
+				},
+				actionStmt{
+					Op:            OpDodoc,
+					Source:        "README.md",
+					RequiredState: StateRequirement{Family: StateFamilyDoc, Value: ""},
+				},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 4)
+		require.Equal(t, stateStmt{Family: StateFamilyDoc, Value: "html"}, reduced.Body[0])
+		require.Equal(t, actionStmt{Op: OpDodoc, Source: "manual.html", RequiredState: StateRequirement{Family: StateFamilyDoc, Value: "html"}}, reduced.Body[1])
+		require.Equal(t, stateStmt{Family: StateFamilyDoc, Value: ""}, reduced.Body[2])
+		require.Equal(t, actionStmt{Op: OpDodoc, Source: "README.md", RequiredState: StateRequirement{Family: StateFamilyDoc, Value: ""}}, reduced.Body[3])
+	})
+
+	t.Run("first doexe path must explicitly execute exeinto", func(t *testing.T) {
+		plan := &installPlan{
+			Body: []installStmt{
+				actionStmt{
+					Op:            OpDoexe,
+					Source:        "prog",
+					RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/usr/bin"},
+				},
+			},
+		}
+		reduced := plan.reducePlan()
+		require.Len(t, reduced.Body, 2)
+		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: "/usr/bin"}, reduced.Body[0])
+		require.Equal(t, actionStmt{Op: OpDoexe, Source: "prog", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/usr/bin"}}, reduced.Body[1])
+	})
 }
 
 func TestRawStatementRendering(t *testing.T) {
@@ -908,7 +1086,7 @@ func TestInitialIndentationInput(t *testing.T) {
 		},
 	}
 	rendered := plan.String(">>>>")
-	expected := ">>>>if use foo; then\n>>>>  if use bar; then\n>>>>    doexe \"app\"\n>>>>  fi\n>>>>fi"
+	expected := ">>>>if use foo; then\n>>>>  if use bar; then\n>>>>    doexe \"app\" || die \"Failed to install app\"\n>>>>  fi\n>>>>fi"
 	require.Equal(t, expected, rendered)
 }
 
@@ -1118,8 +1296,8 @@ func TestDecomposeDestination(t *testing.T) {
 			section:        "dobin",
 			src:            "bin/mycli",
 			dst:            "",
-			expectedFamily: StateFamilyNone,
-			expectedDir:    "",
+			expectedFamily: StateFamilyBin,
+			expectedDir:    "/usr",
 			expectedBase:   "mycli",
 		},
 		{
@@ -1127,8 +1305,8 @@ func TestDecomposeDestination(t *testing.T) {
 			section:        "dobin",
 			src:            "bin/mycli_v2",
 			dst:            "mycli",
-			expectedFamily: StateFamilyNone,
-			expectedDir:    "",
+			expectedFamily: StateFamilyBin,
+			expectedDir:    "/usr",
 			expectedBase:   "mycli",
 		},
 		{
@@ -1185,7 +1363,7 @@ func TestDecomposeDestination(t *testing.T) {
 			src:            "app.service",
 			dst:            "/usr/lib/systemd/system/app-custom.service",
 			expectedFamily: StateFamilyNone,
-			expectedDir:    "",
+			expectedDir:    "/usr/lib/systemd/system",
 			expectedBase:   "app-custom.service",
 		},
 		{
@@ -1194,7 +1372,7 @@ func TestDecomposeDestination(t *testing.T) {
 			src:            "foo.confd",
 			dst:            "/etc/conf.d/foo",
 			expectedFamily: StateFamilyNone,
-			expectedDir:    "",
+			expectedDir:    "/etc/conf.d",
 			expectedBase:   "foo",
 		},
 		{
@@ -1212,7 +1390,7 @@ func TestDecomposeDestination(t *testing.T) {
 			src:            "foo_impl.h",
 			dst:            "/usr/include/foo.h",
 			expectedFamily: StateFamilyNone,
-			expectedDir:    "",
+			expectedDir:    "/usr/include",
 			expectedBase:   "foo.h",
 		},
 		{

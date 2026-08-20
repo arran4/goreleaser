@@ -48,6 +48,25 @@ type installItemData struct {
 	StateFamily StateFamily
 }
 
+func (d installItemData) Validate() error {
+	if d.Section == "" {
+		return errors.New("section is required")
+	}
+	if d.Source == "" {
+		return errors.New("source is required")
+	}
+	isRename := d.Source != d.Base && d.Section != "dosym"
+	op := resolveInstallOp(d.Section, isRename)
+	desc := op.Descriptor()
+	if desc.ArgMode == ArgModeRename && d.Base == "" {
+		return fmt.Errorf("%s requires a destination base name", op)
+	}
+	if desc.RequiresStateInitialization && d.Dir == "" {
+		return fmt.Errorf("%s requires a destination directory", op)
+	}
+	return nil
+}
+
 type ebuildData struct {
 	Name         string
 	Description  string
@@ -267,6 +286,45 @@ func (v *extraFilesProcessor) validate(name, src string) error {
 func decomposeDestination(sectionName, src, dst, defaultDir string) (StateFamily, string, string, error) {
 	op := resolveSectionOp(sectionName)
 	return op.Descriptor().DecomposeDestination(src, dst, defaultDir)
+}
+
+func lowerInstallItemsFromConfig(sectionName string, cfgItems []config.GentooInstallItem, defaultDir string) ([]installItemData, error) {
+	var items []installItemData
+	for _, d := range cfgItems {
+		if d.Src == "" {
+			return nil, fmt.Errorf("gentoo %s: src is required", sectionName)
+		}
+		var keywords []string
+		for _, arch := range d.Archs {
+			kw, err := gentooArch(arch)
+			if err != nil {
+				return nil, fmt.Errorf("gentoo %s: %w", sectionName, err)
+			}
+			keywords = append(keywords, kw)
+		}
+		slices.Sort(keywords)
+		keywords = slices.Compact(keywords)
+
+		family, dir, base, err := decomposeDestination(sectionName, d.Src, d.Dst, defaultDir)
+		if err != nil {
+			return nil, err
+		}
+		item := installItemData{
+			Source:      d.Src,
+			Target:      d.Dst,
+			Dir:         dir,
+			Base:        base,
+			Use:         d.Use,
+			Keywords:    keywords,
+			Section:     sectionName,
+			StateFamily: family,
+		}
+		if err := item.Validate(); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
 }
 
 func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []config.GentooInstallItem, defaultDir string) ([]installItemData, error) {
