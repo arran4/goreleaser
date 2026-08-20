@@ -42,9 +42,9 @@ func (f StateFamily) Descriptor() StateFamilyDescriptor {
 		return StateFamilyDescriptor{
 			Family:                      StateFamilyIns,
 			Command:                     "insinto",
-			HasKnownInitialState:        false,
+			HasKnownInitialState:        true,
 			DefaultState:                "/",
-			RequiresStateInitialization: true,
+			RequiresStateInitialization: false,
 		}
 	case StateFamilyBin:
 		return StateFamilyDescriptor{
@@ -75,7 +75,7 @@ func (f StateFamily) Descriptor() StateFamilyDescriptor {
 
 func InitialState() map[StateFamily]string {
 	state := make(map[StateFamily]string)
-	for _, f := range []StateFamily{StateFamilyBin, StateFamilyDoc} {
+	for _, f := range []StateFamily{StateFamilyBin, StateFamilyDoc, StateFamilyIns} {
 		desc := f.Descriptor()
 		if desc.HasKnownInitialState {
 			state[f] = desc.DefaultState
@@ -140,6 +140,33 @@ const (
 	OpNewman         InstallOp = "newman"
 	OpDodir          InstallOp = "dodir"
 )
+
+var allInstallOps = []InstallOp{
+	OpDoexe,
+	OpNewexe,
+	OpDoins,
+	OpNewins,
+	OpDobin,
+	OpNewbin,
+	OpDosbin,
+	OpNewsbin,
+	OpDoconfd,
+	OpNewconfd,
+	OpDoenvd,
+	OpNewenvd,
+	OpDoheader,
+	OpNewheader,
+	OpDoinitd,
+	OpNewinitd,
+	OpSystemdDounit,
+	OpSystemdNewunit,
+	OpDosym,
+	OpDodoc,
+	OpNewdoc,
+	OpDoman,
+	OpNewman,
+	OpDodir,
+}
 
 type OpDescriptor struct {
 	Op      InstallOp
@@ -337,9 +364,9 @@ func (op InstallOp) Descriptor() OpDescriptor {
 			SupportsRename:              true,
 			RenameOp:                    OpNewins,
 			StateFamily:                 StateFamilyIns,
-			RequiresStateInitialization: true,
+			RequiresStateInitialization: false,
 			DefaultState:                "/",
-			HasKnownInitialState:        false,
+			HasKnownInitialState:        true,
 			DestinationMode:             DestinationModeIns,
 			AppendDie:                   true,
 		}
@@ -350,9 +377,9 @@ func (op InstallOp) Descriptor() OpDescriptor {
 			ArgMode:                     ArgModeRename,
 			IsRename:                    true,
 			StateFamily:                 StateFamilyIns,
-			RequiresStateInitialization: true,
+			RequiresStateInitialization: false,
 			DefaultState:                "/",
-			HasKnownInitialState:        false,
+			HasKnownInitialState:        true,
 			DestinationMode:             DestinationModeIns,
 			AppendDie:                   true,
 		}
@@ -730,10 +757,6 @@ func (s stateStmt) Validate() error {
 	if s.Family == "" {
 		return errors.New("stateStmt requires a state family")
 	}
-	desc := s.Family.Descriptor()
-	if desc.RequiresStateInitialization && s.Value == "" {
-		return fmt.Errorf("stateStmt %s requires a directory value", s.Family)
-	}
 	return nil
 }
 
@@ -797,6 +820,15 @@ func (a actionStmt) Validate() error {
 	}
 	if desc.ArgMode == ArgModeSingle && a.Target != "" {
 		return fmt.Errorf("%s does not accept a second argument", desc.Command)
+	}
+	if desc.StateFamily != StateFamilyNone {
+		if a.RequiredState.Family != desc.StateFamily {
+			return fmt.Errorf("%s requires state family %s, got %s", desc.Command, desc.StateFamily, a.RequiredState.Family)
+		}
+	} else {
+		if a.RequiredState.Family != StateFamilyNone {
+			return fmt.Errorf("%s does not use destination state, got family %s", desc.Command, a.RequiredState.Family)
+		}
 	}
 	return nil
 }
@@ -1485,40 +1517,27 @@ func reduceStmts(stmts []installStmt, universe []string, state map[StateFamily]s
 				}
 			}
 
+		case rawStmt:
+			// Non-empty rawStmt invalidates all tracked mutable install state.
+			clear(state)
+			reduced = append(reduced, s)
+
 		case stateStmt:
-			desc := s.Family.Descriptor()
 			if val, ok := state[s.Family]; ok && val == s.Value {
-				continue // redundant
-			}
-			if _, ok := state[s.Family]; !ok && desc.HasKnownInitialState && desc.DefaultState == s.Value {
-				state[s.Family] = s.Value
-				continue // redundant with Portage initial state
+				continue // redundant with already tracked state
 			}
 			state[s.Family] = s.Value
 			reduced = append(reduced, s)
 
 		case actionStmt:
-			if s.RequiredState.Family != StateFamilyNone && s.RequiredState.Value != "" {
-				fam := s.RequiredState.Family
-				val := s.RequiredState.Value
-				currentVal, isSet := state[fam]
-				if !isSet || currentVal != val {
-					// State is not set to what this action requires. Emit state setter!
+			if s.RequiredState.Family != StateFamilyNone {
+				current, known := state[s.RequiredState.Family]
+				if !known || current != s.RequiredState.Value {
 					reduced = append(reduced, stateStmt{
-						Family: fam,
-						Value:  val,
+						Family: s.RequiredState.Family,
+						Value:  s.RequiredState.Value,
 					})
-					state[fam] = val
-				}
-			} else if s.RequiredState.Family == StateFamilyDoc && s.RequiredState.Value == "" {
-				// docinto default reset
-				currentVal, isSet := state[StateFamilyDoc]
-				if isSet && currentVal != "" {
-					reduced = append(reduced, stateStmt{
-						Family: StateFamilyDoc,
-						Value:  "",
-					})
-					state[StateFamilyDoc] = ""
+					state[s.RequiredState.Family] = s.RequiredState.Value
 				}
 			}
 			reduced = append(reduced, s)

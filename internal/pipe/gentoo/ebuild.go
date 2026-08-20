@@ -61,9 +61,6 @@ func (d installItemData) Validate() error {
 	if desc.ArgMode == ArgModeRename && d.Base == "" {
 		return fmt.Errorf("%s requires a destination base name", op)
 	}
-	if desc.RequiresStateInitialization && d.Dir == "" {
-		return fmt.Errorf("%s requires a destination directory", op)
-	}
 	return nil
 }
 
