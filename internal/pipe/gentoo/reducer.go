@@ -200,94 +200,22 @@ func (d OpDescriptor) TakesTwoArgs() bool {
 func (d OpDescriptor) DecomposeDestination(src, dst, defaultDir string) (StateFamily, string, string, error) {
 	switch d.DestinationMode {
 	case DestinationModeIntoBin:
-		if dst == "" {
-			return StateFamilyBin, "/usr", path.Base(filepath.ToSlash(src)), nil
-		}
-		cleanedDst := path.Clean(filepath.ToSlash(dst))
-		dir := path.Dir(cleanedDst)
-		base := path.Base(cleanedDst)
-		if dir == "." || dir == "" {
-			return StateFamilyBin, "/usr", base, nil
-		}
-		var root string
-		switch {
-		case dir == "bin" || dir == "/bin":
-			root = "/"
-		case strings.HasSuffix(dir, "/bin"):
-			root, _ = strings.CutSuffix(dir, "/bin")
-			if root == "" {
-				root = "/"
-			}
-		default:
-			return StateFamilyNone, "", "", fmt.Errorf("gentoo %s: destination %q is incompatible with %s; directory must end in /bin", d.Command, dst, d.Command)
-		}
-		return StateFamilyBin, root, base, nil
+		return d.decomposeBinDestination(src, dst, "bin")
 
 	case DestinationModeIntoSbin:
-		if dst == "" {
-			return StateFamilyBin, "/usr", path.Base(filepath.ToSlash(src)), nil
-		}
-		cleanedDst := path.Clean(filepath.ToSlash(dst))
-		dir := path.Dir(cleanedDst)
-		base := path.Base(cleanedDst)
-		if dir == "." || dir == "" {
-			return StateFamilyBin, "/usr", base, nil
-		}
-		var root string
-		switch {
-		case dir == "sbin" || dir == "/sbin":
-			root = "/"
-		case strings.HasSuffix(dir, "/sbin"):
-			root, _ = strings.CutSuffix(dir, "/sbin")
-			if root == "" {
-				root = "/"
-			}
-		default:
-			return StateFamilyNone, "", "", fmt.Errorf("gentoo %s: destination %q is incompatible with %s; directory must end in /sbin", d.Command, dst, d.Command)
-		}
-		return StateFamilyBin, root, base, nil
+		return d.decomposeBinDestination(src, dst, "sbin")
 
 	case DestinationModeExe:
-		dirVal := defaultDir
-		if dst == "" {
-			return StateFamilyExe, dirVal, path.Base(filepath.ToSlash(src)), nil
-		}
-		cleanedDst := path.Clean(filepath.ToSlash(dst))
-		dir := path.Dir(cleanedDst)
-		base := path.Base(cleanedDst)
-		if dir != "." && dir != "" {
-			dirVal = dir
-		}
-		return StateFamilyExe, dirVal, base, nil
+		return d.decomposeStateDestination(StateFamilyExe, src, dst, defaultDir)
 
 	case DestinationModeIns:
-		dirVal := defaultDir
-		if dirVal == "" {
-			dirVal = "/"
+		if defaultDir == "" {
+			defaultDir = "/"
 		}
-		if dst == "" {
-			return StateFamilyIns, dirVal, path.Base(filepath.ToSlash(src)), nil
-		}
-		cleanedDst := path.Clean(filepath.ToSlash(dst))
-		dir := path.Dir(cleanedDst)
-		base := path.Base(cleanedDst)
-		if dir != "." && dir != "" {
-			dirVal = dir
-		}
-		return StateFamilyIns, dirVal, base, nil
+		return d.decomposeStateDestination(StateFamilyIns, src, dst, defaultDir)
 
 	case DestinationModeDoc:
-		if dst == "" {
-			return StateFamilyDoc, "", path.Base(filepath.ToSlash(src)), nil
-		}
-		cleanedDst := path.Clean(filepath.ToSlash(dst))
-		dir := path.Dir(cleanedDst)
-		base := path.Base(cleanedDst)
-		docDir := ""
-		if dir != "." && dir != "" {
-			docDir = strings.TrimPrefix(dir, "/")
-		}
-		return StateFamilyDoc, docDir, base, nil
+		return d.decomposeDocDestination(src, dst)
 
 	case DestinationModeFixed:
 		if dst == "" {
@@ -325,6 +253,53 @@ func (d OpDescriptor) DecomposeDestination(src, dst, defaultDir string) (StateFa
 	default:
 		return StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
 	}
+}
+
+func (d OpDescriptor) decomposeBinDestination(src, dst, directoryName string) (StateFamily, string, string, error) {
+	if dst == "" {
+		return StateFamilyBin, "/usr", path.Base(filepath.ToSlash(src)), nil
+	}
+	cleaned := path.Clean(filepath.ToSlash(dst))
+	dir, base := path.Dir(cleaned), path.Base(cleaned)
+	if dir == "." || dir == "" {
+		return StateFamilyBin, "/usr", base, nil
+	}
+	if dir == directoryName || dir == "/"+directoryName {
+		return StateFamilyBin, "/", base, nil
+	}
+	suffix := "/" + directoryName
+	root, ok := strings.CutSuffix(dir, suffix)
+	if !ok {
+		return StateFamilyNone, "", "", fmt.Errorf("gentoo %s: destination %q is incompatible with %s; directory must end in /%s", d.Command, dst, d.Command, directoryName)
+	}
+	if root == "" {
+		root = "/"
+	}
+	return StateFamilyBin, root, base, nil
+}
+
+func (d OpDescriptor) decomposeStateDestination(family StateFamily, src, dst, defaultDir string) (StateFamily, string, string, error) {
+	if dst == "" {
+		return family, defaultDir, path.Base(filepath.ToSlash(src)), nil
+	}
+	cleaned := path.Clean(filepath.ToSlash(dst))
+	dir, base := path.Dir(cleaned), path.Base(cleaned)
+	if dir != "." && dir != "" {
+		defaultDir = dir
+	}
+	return family, defaultDir, base, nil
+}
+
+func (d OpDescriptor) decomposeDocDestination(src, dst string) (StateFamily, string, string, error) {
+	if dst == "" {
+		return StateFamilyDoc, "", path.Base(filepath.ToSlash(src)), nil
+	}
+	cleaned := path.Clean(filepath.ToSlash(dst))
+	dir, base := path.Dir(cleaned), path.Base(cleaned)
+	if dir == "." || dir == "" {
+		return StateFamilyDoc, "", base, nil
+	}
+	return StateFamilyDoc, strings.TrimPrefix(dir, "/"), base, nil
 }
 
 func (op InstallOp) Descriptor() OpDescriptor {
@@ -1408,35 +1383,71 @@ func simplifyExpr(expr conditionExpr, universe []string) conditionExpr {
 	}
 }
 
-type installPlan struct {
+// InstallProgram is the install statement IR shared by lowering, reduction,
+// validation, and ebuild rendering.
+type InstallProgram struct {
 	UniverseArchitectures []string
 	Body                  []installStmt
 }
 
-func (p *installPlan) String(indent string) string {
+func (p *InstallProgram) String(indent string) string {
 	if p == nil {
 		return ""
 	}
 	return formatStmts(p.Body, indent)
 }
 
-func (p *installPlan) reducePlan() *installPlan {
-	return p.Reduce()
-}
-
 // Reduce simplifies an install program to a fixed point while preserving its
 // state requirements and architecture/USE conditions.
-func (p *installPlan) Reduce() *installPlan {
+func (p *InstallProgram) Reduce() *InstallProgram {
 	if p == nil {
 		return nil
 	}
-	current := p
+	return (&installReducer{universe: p.UniverseArchitectures}).reduceFixedPoint(p)
+}
+
+type installReducer struct {
+	universe []string
+}
+
+type installState map[StateFamily]string
+
+func newInstallState() installState { return installState(InitialState()) }
+
+func (s installState) Clone() installState {
+	clone := installState{}
+	maps.Copy(clone, s)
+	return clone
+}
+
+func (s installState) Get(family StateFamily) (string, bool) {
+	value, ok := s[family]
+	return value, ok
+}
+func (s installState) Set(family StateFamily, value string) { s[family] = value }
+func (s installState) Clear()                               { clear(s) }
+
+func (s installState) Join(before, branch installState) {
+	for family, value := range before {
+		branchValue, ok := branch[family]
+		if !ok || branchValue != value {
+			delete(s, family)
+		}
+	}
+	for family := range branch {
+		if _, ok := before[family]; !ok {
+			delete(s, family)
+		}
+	}
+}
+
+func (r *installReducer) reduceFixedPoint(plan *InstallProgram) *InstallProgram {
+	current := plan
 	const maxIterations = 100
 	for range maxIterations {
-		initialState := InitialState()
-		next := &installPlan{
+		next := &InstallProgram{
 			UniverseArchitectures: current.UniverseArchitectures,
-			Body:                  reduceStmts(current.Body, current.UniverseArchitectures, initialState),
+			Body:                  r.reduceStatements(current.Body, newInstallState()),
 		}
 		if planEqual(current, next) {
 			return next
@@ -1446,7 +1457,7 @@ func (p *installPlan) Reduce() *installPlan {
 	panic(fmt.Sprintf("reducer failed to converge after %d iterations", maxIterations))
 }
 
-func (p *installPlan) Validate() error {
+func (p *InstallProgram) Validate() error {
 	if p == nil {
 		return nil
 	}
@@ -1458,7 +1469,7 @@ func (p *installPlan) Validate() error {
 	return nil
 }
 
-func planEqual(a, b *installPlan) bool {
+func planEqual(a, b *InstallProgram) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -1479,15 +1490,15 @@ func planEqual(a, b *installPlan) bool {
 	return true
 }
 
-func reduceStmts(stmts []installStmt, universe []string, state map[StateFamily]string) []installStmt {
+func (r *installReducer) reduceStatements(stmts []installStmt, state installState) []installStmt {
 	var reduced []installStmt
 
 	for _, stmt := range stmts {
 		switch s := stmt.(type) {
 		case conditionStmt:
-			simplifiedExpr := simplifyExpr(s.Expr, universe)
+			simplifiedExpr := simplifyExpr(s.Expr, r.universe)
 			if simplifiedExpr == nil || simplifiedExpr.Equals(TrueExpr{}) {
-				sBody := reduceStmts(s.Body, universe, state)
+				sBody := r.reduceStatements(s.Body, state)
 				reduced = append(reduced, sBody...)
 				continue
 			}
@@ -1496,13 +1507,9 @@ func reduceStmts(stmts []installStmt, universe []string, state map[StateFamily]s
 			}
 			s.Expr = simplifiedExpr
 
-			stateBefore := make(map[StateFamily]string)
-			maps.Copy(stateBefore, state)
-
-			branchState := make(map[StateFamily]string)
-			maps.Copy(branchState, stateBefore)
-
-			reducedBody := reduceStmts(s.Body, universe, branchState)
+			stateBefore := state.Clone()
+			branchState := stateBefore.Clone()
+			reducedBody := r.reduceStatements(s.Body, branchState)
 			if len(reducedBody) == 0 {
 				continue
 			}
@@ -1510,40 +1517,28 @@ func reduceStmts(stmts []installStmt, universe []string, state map[StateFamily]s
 			s.Body = reducedBody
 			reduced = append(reduced, s)
 
-			// Join state: any family whose value diverged in the branch becomes uncertain
-			for k, vBefore := range stateBefore {
-				vBranch, ok := branchState[k]
-				if !ok || vBranch != vBefore {
-					delete(state, k)
-				}
-			}
-			for k := range branchState {
-				if _, ok := stateBefore[k]; !ok {
-					delete(state, k)
-				}
-			}
+			state.Join(stateBefore, branchState)
 
 		case rawStmt:
-			// Non-empty rawStmt invalidates all tracked mutable install state.
-			clear(state)
+			state.Clear()
 			reduced = append(reduced, s)
 
 		case stateStmt:
-			if val, ok := state[s.Family]; ok && val == s.Value {
+			if val, ok := state.Get(s.Family); ok && val == s.Value {
 				continue // redundant with already tracked state
 			}
-			state[s.Family] = s.Value
+			state.Set(s.Family, s.Value)
 			reduced = append(reduced, s)
 
 		case actionStmt:
 			if s.RequiredState.Family != StateFamilyNone {
-				current, known := state[s.RequiredState.Family]
+				current, known := state.Get(s.RequiredState.Family)
 				if !known || current != s.RequiredState.Value {
 					reduced = append(reduced, stateStmt{
 						Family: s.RequiredState.Family,
 						Value:  s.RequiredState.Value,
 					})
-					state[s.RequiredState.Family] = s.RequiredState.Value
+					state.Set(s.RequiredState.Family, s.RequiredState.Value)
 				}
 			}
 			reduced = append(reduced, s)
@@ -1554,12 +1549,12 @@ func reduceStmts(stmts []installStmt, universe []string, state map[StateFamily]s
 	}
 
 	// Merge and factor sibling conditions
-	reduced = mergeAndFactorSiblingConditions(reduced)
+	reduced = r.mergeSiblingConditions(reduced)
 
 	return reduced
 }
 
-func mergeAndFactorSiblingConditions(stmts []installStmt) []installStmt {
+func (r *installReducer) mergeSiblingConditions(stmts []installStmt) []installStmt {
 	var result []installStmt
 	i := 0
 	for i < len(stmts) {
@@ -1586,14 +1581,14 @@ func mergeAndFactorSiblingConditions(stmts []installStmt) []installStmt {
 			j++
 		}
 
-		factored := factorConditionsSlice(conds)
+		factored := r.factorConditions(conds)
 		result = append(result, factored...)
 		i = j
 	}
 	return result
 }
 
-func factorConditionsSlice(conds []conditionStmt) []installStmt {
+func (r *installReducer) factorConditions(conds []conditionStmt) []installStmt {
 	if len(conds) == 0 {
 		return nil
 	}
@@ -1631,7 +1626,7 @@ func factorConditionsSlice(conds []conditionStmt) []installStmt {
 			}
 			factoredCond := conditionStmt{
 				Expr: bestFactor,
-				Body: mergeAndFactorSiblingConditions(innerBody),
+				Body: r.mergeSiblingConditions(innerBody),
 			}
 			result = append(result, factoredCond)
 			i = bestJ + 1

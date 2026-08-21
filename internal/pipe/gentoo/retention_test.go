@@ -3,8 +3,15 @@ package gentoo
 import (
 	"testing"
 
+	"github.com/goreleaser/goreleaser/v2/pkg/config"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRetentionPlannerDoesNotEvictNewerVersionForBackfill(t *testing.T) {
+	cfg := &GentooConfig{raw: config.Gentoo{Name: "foo", KeepVersions: 1}}
+	plan := NewRetentionPlanner(cfg, []string{"foo-bin-2.0.ebuild"}, []string{"foo-bin-1.0.ebuild"}).Plan()
+	require.Empty(t, plan.Deletes)
+}
 
 func TestDetermineKeepLatestDeletions(t *testing.T) {
 	prefix := "foo-"

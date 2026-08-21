@@ -2,21 +2,14 @@ package gentoo
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"crypto/sha512"
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"hash"
-	"io"
-	"os"
 	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-
-	"golang.org/x/crypto/blake2b"
 
 	"github.com/goreleaser/goreleaser/v2/internal/artifact"
 	"github.com/goreleaser/goreleaser/v2/internal/client"
@@ -58,7 +51,9 @@ type gentooUse struct {
 	Nodes   []gentooInnerNode `xml:",any"`
 }
 
-type gentooMetadata struct {
+// Metadata preserves unknown XML nodes, attributes, comments, and ordering
+// while applying the Gentoo fields managed by this publisher.
+type Metadata struct {
 	XMLName     xml.Name           `xml:"pkgmetadata"`
 	Attrs       []xml.Attr         `xml:",any,attr"`
 	Maintainers []gentooMaintainer `xml:"maintainer"`
@@ -67,7 +62,7 @@ type gentooMetadata struct {
 	InnerNodes  []gentooInnerNode  `xml:",any"`
 }
 
-func (m *gentooMetadata) AddMaintainers(maintainers []config.GentooMaintainer) error {
+func (m *Metadata) AddMaintainers(maintainers []config.GentooMaintainer) error {
 	for _, main := range maintainers {
 		if main.Email == "" {
 			return errors.New("maintainer email is required")
@@ -90,7 +85,7 @@ func (m *gentooMetadata) AddMaintainers(maintainers []config.GentooMaintainer) e
 	return nil
 }
 
-func (m *gentooMetadata) AddUseFlags(flags []config.GentooUseFlag) {
+func (m *Metadata) AddUseFlags(flags []config.GentooUseFlag) {
 	if len(flags) == 0 {
 		return
 	}
@@ -129,7 +124,7 @@ func (m *gentooMetadata) AddUseFlags(flags []config.GentooUseFlag) {
 	}
 }
 
-func (m *gentooMetadata) SetUpstream(bugsTo string) {
+func (m *Metadata) SetUpstream(bugsTo string) {
 	if bugsTo == "" {
 		return
 	}
@@ -139,7 +134,7 @@ func (m *gentooMetadata) SetUpstream(bugsTo string) {
 	m.Upstream.BugsTo = bugsTo
 }
 
-func (m *gentooMetadata) Marshal() ([]byte, error) {
+func (m *Metadata) Marshal() ([]byte, error) {
 	content, err := xml.MarshalIndent(m, "", "\t")
 	if err != nil {
 		return nil, err
@@ -148,15 +143,33 @@ func (m *gentooMetadata) Marshal() ([]byte, error) {
 	return append(header, append(content, '\n')...), nil
 }
 
-type overlaySettings struct {
+func ParseMetadata(content []byte) (*Metadata, error) {
+	metadata := &Metadata{}
+	if err := xml.Unmarshal(content, metadata); err != nil {
+		return nil, err
+	}
+	return metadata, nil
+}
+
+func (m *Metadata) Render() ([]byte, error) { return m.Marshal() }
+
+// Layout is the effective overlay layout.conf policy after applying explicit
+// publisher overrides.
+type Layout struct {
 	hashes                    []string
 	thin                      bool
 	cacheFormats              []string
 	hasCacheFormatsConfigured bool
 }
 
-func loadOverlaySettings(ctx *context.Context, cfg config.Gentoo, repoClient any, repo client.Repo) (overlaySettings, error) {
-	settings := overlaySettings{
+func (l Layout) ManifestHashes() []string { return slices.Clone(l.hashes) }
+func (l Layout) ThinManifests() bool      { return l.thin }
+func (l Layout) SupportsMetaCache() bool {
+	return !l.hasCacheFormatsConfigured || slices.Contains(l.cacheFormats, "md5-dict") || slices.Contains(l.cacheFormats, "md5-cache")
+}
+
+func loadOverlaySettings(ctx *context.Context, cfg config.Gentoo, repoClient any, repo client.Repo) (Layout, error) {
+	settings := Layout{
 		hashes: []string{"BLAKE2B", "SHA512"},
 		thin:   false,
 	}
@@ -200,86 +213,14 @@ func loadOverlaySettings(ctx *context.Context, cfg config.Gentoo, repoClient any
 	return settings, nil
 }
 
-func generateManifestLine(recordType, filename, pathStr string, content []byte, manifestHashes []string) (string, error) {
-	var r io.Reader
-	var size int64
-
-	if content == nil && pathStr != "" {
-		info, err := os.Stat(pathStr)
-		if err != nil {
-			return "", err
-		}
-		size = info.Size()
-
-		f, err := os.Open(pathStr)
-		if err != nil {
-			return "", err
-		}
-		defer f.Close()
-		r = f
-	} else {
-		size = int64(len(content))
-		r = bytes.NewReader(content)
-	}
-
-	var writers []io.Writer
-	var b2b hash.Hash
-	var s512 hash.Hash
-	var s256 hash.Hash
-
-	for _, algo := range manifestHashes {
-		algo = strings.ToUpper(algo)
-		switch algo {
-		case "BLAKE2B":
-			b2b, _ = blake2b.New512(nil)
-			writers = append(writers, b2b)
-		case "SHA512":
-			s512 = sha512.New()
-			writers = append(writers, s512)
-		case "SHA256":
-			s256 = sha256.New()
-			writers = append(writers, s256)
-		default:
-			return "", fmt.Errorf("unsupported manifest hash algorithm: %s", algo)
-		}
-	}
-
-	if len(writers) > 0 {
-		if _, err := io.Copy(io.MultiWriter(writers...), r); err != nil {
-			return "", err
-		}
-	}
-
-	line := fmt.Sprintf("%s %s %d", recordType, filename, size)
-	for _, algo := range manifestHashes {
-		algo = strings.ToUpper(algo)
-		switch algo {
-		case "BLAKE2B":
-			if b2b != nil {
-				line = fmt.Sprintf("%s BLAKE2B %x", line, b2b.Sum(nil))
-			}
-		case "SHA512":
-			if s512 != nil {
-				line = fmt.Sprintf("%s SHA512 %x", line, s512.Sum(nil))
-			}
-		case "SHA256":
-			if s256 != nil {
-				line = fmt.Sprintf("%s SHA256 %x", line, s256.Sum(nil))
-			}
-		}
-	}
-
-	return line, nil
-}
-
-func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, repoClient any, repo client.Repo, files *[]client.RepoFile, deletedEbuilds []string) error {
+func prepareManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, repoClient any, repo client.Repo, changes *ChangeSet, deletedEbuilds []string) error {
 	dir := packageDir(cfg)
 
 	metadataPath := path.Join(dir, "metadata.xml")
 	manifestPath := path.Join(dir, "Manifest")
 
 	if len(cfg.Maintainers) > 0 || cfg.BugsTo != "" || len(cfg.UseFlags) > 0 {
-		meta := gentooMetadata{}
+		meta := Metadata{}
 		if dl, ok := repoClient.(client.FileDownloader); ok {
 			content, err := dl.DownloadFile(ctx, repo, metadataPath)
 			if err == nil {
@@ -301,7 +242,7 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 		if err != nil {
 			return err
 		}
-		*files = append(*files, client.RepoFile{
+		changes.files = append(changes.files, client.RepoFile{
 			Content: content,
 			Path:    metadataPath,
 		})
@@ -320,7 +261,7 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 	prefix := filepath.Base(dir) + "-"
 
 	retainedBaseVersions := make(map[string]bool)
-	for _, f := range *files {
+	for _, f := range changes.files {
 		if f.Delete || !strings.HasSuffix(f.Path, ".ebuild") || !isInsidePackageDir(f.Path, dir) {
 			continue
 		}
@@ -357,7 +298,7 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 
 	newManifestFiles := map[string]struct{}{}
 	if !thinManifests {
-		for _, f := range *files {
+		for _, f := range changes.files {
 			if !f.Delete && isInsidePackageDir(f.Path, dir) {
 				recordType, filename := manifestFileInfo(f.Path, dir)
 				newManifestFiles[recordType+":"+filename] = struct{}{}
@@ -373,9 +314,21 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 		filters = append(filters, artifact.ByIDs(cfg.IDs...))
 	}
 	arches := ctx.Artifacts.Filter(artifact.And(filters...)).List()
+	var resolved *GentooConfig
+	if ctx.Version != "" {
+		version, versionErr := convertToGentooVersion(ctx.Version, "gentoo-version")
+		if versionErr != nil {
+			return versionErr
+		}
+		resolved = &GentooConfig{raw: cfg, version: version}
+	}
 	currentDists := make(map[string]struct{}, len(arches))
 	for _, art := range arches {
-		currentDists[art.Name] = struct{}{}
+		name := art.Name
+		if resolved != nil {
+			name = archiveDistfile(resolved, ctx.Version, art.Name)
+		}
+		currentDists[name] = struct{}{}
 	}
 
 	var newManifestLines []string
@@ -441,7 +394,11 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 	}
 
 	for _, art := range arches {
-		line, err := generateManifestLine("DIST", art.Name, art.Path, nil, manifestHashes)
+		distfile := art.Name
+		if resolved != nil {
+			distfile = archiveDistfile(resolved, ctx.Version, art.Name)
+		}
+		line, err := NewManifestHasher(manifestHashes).Line("DIST", distfile, art.Path, nil)
 		if err != nil {
 			return err
 		}
@@ -449,14 +406,14 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 	}
 
 	if !thinManifests {
-		for _, f := range *files {
+		for _, f := range changes.files {
 			if f.Delete || !isInsidePackageDir(f.Path, dir) {
 				continue
 			}
 
 			recordType, filename := manifestFileInfo(f.Path, dir)
 
-			line, err := generateManifestLine(recordType, filename, f.Path, f.Content, manifestHashes)
+			line, err := NewManifestHasher(manifestHashes).Line(recordType, filename, f.Path, f.Content)
 			if err != nil {
 				return err
 			}
@@ -467,7 +424,7 @@ func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, re
 	if len(newManifestLines) > 0 {
 		slices.Sort(newManifestLines)
 		newManifestLines = slices.Compact(newManifestLines)
-		*files = append(*files, client.RepoFile{
+		changes.files = append(changes.files, client.RepoFile{
 			Content: []byte(strings.Join(newManifestLines, "\n") + "\n"),
 			Path:    manifestPath,
 		})

@@ -7,18 +7,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"path"
-	"path/filepath"
 	"slices"
 	"strings"
 	"text/template"
 
-	"github.com/caarlos0/log"
-	"github.com/goreleaser/goreleaser/v2/internal/artifact"
 	"github.com/goreleaser/goreleaser/v2/pkg/config"
-	"github.com/goreleaser/goreleaser/v2/pkg/context"
 )
 
 //go:embed templates/ebuild.tmpl
@@ -56,15 +49,17 @@ func (d installItemData) Validate() error {
 		return errors.New("source is required")
 	}
 	isRename := d.Source != d.Base && d.Section != "dosym"
-	op := resolveInstallOp(d.Section, isRename)
-	desc := op.Descriptor()
+	desc := resolveInstallOp(d.Section, isRename).Descriptor()
 	if desc.ArgMode == ArgModeRename && d.Base == "" {
-		return fmt.Errorf("%s requires a destination base name", op)
+		return fmt.Errorf("%s requires a destination base name", resolveInstallOp(d.Section, isRename))
 	}
 	return nil
 }
 
-type ebuildData struct {
+// Ebuild is a rendered package definition built from a normalized Release and
+// an already reduced install program. It never performs archive selection or
+// config install-item resolution.
+type Ebuild struct {
 	Name         string
 	Description  string
 	Homepage     string
@@ -76,84 +71,82 @@ type ebuildData struct {
 	UseFlags     []config.GentooUseFlag
 	Systemd      []installItemData
 	Eclasses     []string
-	Plan         *installPlan
+	Plan         *InstallProgram
 }
 
-func (d ebuildData) Validate() error {
-	if strings.TrimSpace(d.Description) == "" {
+func (e Ebuild) Validate() error {
+	if strings.TrimSpace(e.Description) == "" {
 		return errors.New("gentoo description is required and cannot be empty")
 	}
-	if strings.TrimSpace(d.License) == "" {
+	if strings.TrimSpace(e.License) == "" {
 		return errors.New("gentoo license is required and cannot be empty")
 	}
-	if d.Plan != nil {
-		return d.Plan.Validate()
+	if e.Plan == nil {
+		return nil
 	}
-	return nil
+	return e.Plan.Validate()
 }
 
-func (d ebuildData) HasEclasses() bool {
-	return len(d.Eclasses) > 0
+func (e Ebuild) HasEclasses() bool { return len(e.Eclasses) > 0 }
+
+func shellEscape(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `"`, `\"`)
+	value = strings.ReplaceAll(value, `$`, `\$`)
+	return strings.ReplaceAll(value, "`", "\\`")
 }
 
-func shellEscape(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, `$`, `\$`)
-	s = strings.ReplaceAll(s, "`", "\\`")
-	return s
-}
-
-func (d ebuildData) InstallScript(indent string) string {
-	if d.Plan == nil {
+func (e Ebuild) InstallScript(indent string) string {
+	if e.Plan == nil {
 		return ""
 	}
-	return d.Plan.String(indent)
+	return e.Plan.String(indent)
 }
 
-func (d ebuildData) RenderEbuild() (string, error) {
-	var buf bytes.Buffer
-	if err := template.Must(template.New("ebuild").Funcs(template.FuncMap{
-		"escape": shellEscape,
-	}).Parse(ebuildTemplate)).Execute(&buf, d); err != nil {
+func (e Ebuild) Render() (string, error) {
+	var buffer bytes.Buffer
+	parsed := template.Must(template.New("ebuild").Funcs(template.FuncMap{"escape": shellEscape}).Parse(ebuildTemplate))
+	if err := parsed.Execute(&buffer, e); err != nil {
 		return "", err
 	}
-	return buf.String(), nil
+	return buffer.String(), nil
 }
 
-func (d ebuildData) SortedUseFlags() []string {
-	var useFlags []string
-	for _, flag := range d.UseFlags {
+func (e Ebuild) SortedUseFlags() []string {
+	var result []string
+	for _, flag := range e.UseFlags {
 		if flag.Flag != "" {
-			useFlags = append(useFlags, flag.Flag)
+			result = append(result, flag.Flag)
 		}
 	}
-	slices.Sort(useFlags)
-	return slices.Compact(useFlags)
+	slices.Sort(result)
+	return slices.Compact(result)
 }
 
-func (d ebuildData) FormattedSrcURIs() []string {
-	var srcURIs []string
-	for _, art := range d.Archs {
-		if art.Keyword != "" && len(art.URIs) > 0 {
-			var files []string
-			for _, u := range art.URIs {
-				files = append(files, fmt.Sprintf("%s -> %s", u.URI, u.File))
-			}
-			srcURIs = append(srcURIs, fmt.Sprintf("%s? ( %s )", art.Keyword, strings.Join(files, " ")))
+func (e Ebuild) FormattedSrcURIs() []string {
+	var result []string
+	for _, architecture := range e.Archs {
+		if architecture.Keyword == "" || len(architecture.URIs) == 0 {
+			continue
 		}
+		files := make([]string, 0, len(architecture.URIs))
+		for _, uri := range architecture.URIs {
+			files = append(files, fmt.Sprintf("%s -> %s", uri.URI, uri.File))
+		}
+		result = append(result, fmt.Sprintf("%s? ( %s )", architecture.Keyword, strings.Join(files, " ")))
 	}
-	return srcURIs
+	return result
 }
 
-func (d ebuildData) RenderMetaCache(ebuildContent string) (string, error) {
-	if d.HasEclasses() {
+// RenderMetaCache produces only the metadata knowable without evaluating
+// eclasses. Callers must skip inherited eclasses rather than publishing a
+// misleading cache entry.
+func (e Ebuild) RenderMetaCache(content string) (string, error) {
+	if e.HasEclasses() {
 		return "", errors.New("cannot render metadata cache for ebuild with inherited eclasses")
 	}
-	h := md5.Sum([]byte(ebuildContent))
-	md5Hex := hex.EncodeToString(h[:])
-
-	tmplData := struct {
+	hash := md5.Sum([]byte(content))
+	data := struct {
 		Description string
 		Homepage    string
 		IUSE        string
@@ -162,372 +155,22 @@ func (d ebuildData) RenderMetaCache(ebuildContent string) (string, error) {
 		SrcURI      string
 		MD5         string
 	}{
-		Description: d.Description,
-		Homepage:    d.Homepage,
-		IUSE:        strings.Join(d.SortedUseFlags(), " "),
-		Keywords:    d.Keywords,
-		License:     d.License,
-		SrcURI:      strings.Join(d.FormattedSrcURIs(), " "),
-		MD5:         md5Hex,
+		Description: e.Description, Homepage: e.Homepage, IUSE: strings.Join(e.SortedUseFlags(), " "),
+		Keywords: e.Keywords, License: e.License, SrcURI: strings.Join(e.FormattedSrcURIs(), " "), MD5: hex.EncodeToString(hash[:]),
 	}
-
-	var buf bytes.Buffer
-	if err := template.Must(template.New("md5-cache").Parse(metaCacheTemplate)).Execute(&buf, tmplData); err != nil {
+	var buffer bytes.Buffer
+	if err := template.Must(template.New("md5-cache").Parse(metaCacheTemplate)).Execute(&buffer, data); err != nil {
 		return "", err
 	}
-	return buf.String(), nil
+	return buffer.String(), nil
 }
 
-func generateMetaCacheContent(data ebuildData, ebuildContent string) string {
-	meta, err := data.RenderMetaCache(ebuildContent)
+func generateMetaCacheContent(ebuild Ebuild, content string) string {
+	meta, err := ebuild.RenderMetaCache(content)
 	if err != nil {
 		return ""
 	}
 	return meta
-}
-
-// ExtraFiles owns the auxiliary files that are copied to an ebuild's files/
-// directory. Install lowering intentionally belongs to InstallPlanner.
-type ExtraFiles struct {
-	cfg        config.Gentoo
-	arches     []*artifact.Artifact
-	extraFiles map[string]string
-}
-
-func newExtraFilesProcessor(cfg config.Gentoo, arches []*artifact.Artifact, extraFiles map[string]string) *ExtraFiles {
-	return &ExtraFiles{
-		cfg:        cfg,
-		arches:     arches,
-		extraFiles: extraFiles,
-	}
-}
-
-func (v *ExtraFiles) inArchives(fileName string) bool {
-	if len(v.arches) == 0 {
-		return false
-	}
-	for _, art := range v.arches {
-		found := false
-		if files, ok := art.Extra[artifact.ExtraFiles].([]string); ok {
-			for _, f := range files {
-				if archiveDestination(*art, f) == normalizeArchivePath(fileName) {
-					found = true
-					break
-				}
-			}
-		}
-		if !found {
-			if bins, ok := art.Extra[artifact.ExtraBinaries].([]string); ok {
-				for _, b := range bins {
-					if archiveDestination(*art, b) == normalizeArchivePath(fileName) {
-						found = true
-						break
-					}
-				}
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
-}
-
-func archiveDestination(art artifact.Artifact, destination string) string {
-	return normalizeArchivePath(filepath.Join(artifact.ExtraOr(art, artifact.ExtraWrappedIn, ""), destination))
-}
-
-func normalizeArchivePath(pathStr string) string {
-	return strings.TrimPrefix(filepath.ToSlash(filepath.Clean(pathStr)), "./")
-}
-
-func (v *ExtraFiles) Filter() error {
-	for name, src := range v.extraFiles {
-		if v.inArchives(name) {
-			log.Warnf("file %s is already in all archives, skipping upload to Gentoo files/ directory", name)
-			delete(v.extraFiles, name)
-			continue
-		}
-		if err := v.validate(name, src); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (v *ExtraFiles) validate(name, src string) error {
-	info, err := os.Stat(src)
-	if err != nil {
-		return fmt.Errorf("failed to stat extra file %s: %w", name, err)
-	}
-	if !v.cfg.SkipFilesValidation {
-		if info.Size() > 20*1024 {
-			return fmt.Errorf("extra file %s is larger than 20KB. Gentoo policy forbids large files in the files/ directory. Please add it to a release asset instead", name)
-		}
-
-		f, err := os.Open(src)
-		if err != nil {
-			return fmt.Errorf("failed to open extra file %s: %w", name, err)
-		}
-		defer f.Close()
-		buf := make([]byte, 512)
-		n, err := f.Read(buf)
-		if err != nil && !errors.Is(err, io.EOF) {
-			return fmt.Errorf("failed to read extra file %s: %w", name, err)
-		}
-		if bytes.IndexByte(buf[:n], 0) != -1 {
-			return fmt.Errorf("extra file %s appears to be a binary file. Gentoo policy forbids binary files in the files/ directory", name)
-		}
-	}
-	return nil
-}
-
-func decomposeDestination(sectionName, src, dst, defaultDir string) (StateFamily, string, string, error) {
-	op := resolveSectionOp(sectionName)
-	return op.Descriptor().DecomposeDestination(src, dst, defaultDir)
-}
-
-func lowerInstallItemsFromConfig(sectionName string, cfgItems []config.GentooInstallItem, defaultDir string) ([]installItemData, error) {
-	var items []installItemData
-	for _, d := range cfgItems {
-		if d.Src == "" {
-			return nil, fmt.Errorf("gentoo %s: src is required", sectionName)
-		}
-		var keywords []string
-		for _, arch := range d.Archs {
-			kw, err := gentooArch(arch)
-			if err != nil {
-				return nil, fmt.Errorf("gentoo %s: %w", sectionName, err)
-			}
-			keywords = append(keywords, kw)
-		}
-		slices.Sort(keywords)
-		keywords = slices.Compact(keywords)
-
-		family, dir, base, err := decomposeDestination(sectionName, d.Src, d.Dst, defaultDir)
-		if err != nil {
-			return nil, err
-		}
-		item := installItemData{
-			Source:      d.Src,
-			Target:      d.Dst,
-			Dir:         dir,
-			Base:        base,
-			Use:         d.Use,
-			Keywords:    keywords,
-			Section:     sectionName,
-			StateFamily: family,
-		}
-		if err := item.Validate(); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, nil
-}
-
-func (v *ExtraFiles) decomposeItemDestination(sectionName, src, dst, defaultDir string) (string, StateFamily, string, string, error) {
-	if sectionName == "systemd" {
-		hasSystemdEclass := slices.Contains(v.cfg.Eclasses, "systemd")
-		if dst == "" {
-			if hasSystemdEclass {
-				return "systemd", StateFamilyNone, "", path.Base(filepath.ToSlash(src)), nil
-			}
-			return "doins", StateFamilyIns, "/usr/lib/systemd/system", path.Base(filepath.ToSlash(src)), nil
-		}
-		cleanedDst := path.Clean(filepath.ToSlash(dst))
-		dir := path.Dir(cleanedDst)
-		base := path.Base(cleanedDst)
-		if hasSystemdEclass && (dir == "." || dir == "" || dir == "/usr/lib/systemd/system" || dir == "usr/lib/systemd/system") {
-			return "systemd", StateFamilyNone, "", base, nil
-		}
-		targetDir := dir
-		if targetDir == "." || targetDir == "" {
-			targetDir = "/usr/lib/systemd/system"
-		}
-		return "doins", StateFamilyIns, targetDir, base, nil
-	}
-	family, dir, base, err := decomposeDestination(sectionName, src, dst, defaultDir)
-	return sectionName, family, dir, base, err
-}
-
-func (v *ExtraFiles) buildInstallItems(sectionName string, cfgItems []config.GentooInstallItem, defaultDir string) ([]installItemData, error) {
-	var items []installItemData
-	for _, d := range cfgItems {
-		if d.Src == "" && d.SrcID == "" {
-			return nil, fmt.Errorf("gentoo %s: either src or src_id is required", sectionName)
-		}
-
-		var keywords []string
-		for _, arch := range d.Archs {
-			kw, err := gentooArch(arch)
-			if err != nil {
-				return nil, fmt.Errorf("gentoo %s: %w", sectionName, err)
-			}
-			keywords = append(keywords, kw)
-		}
-		slices.Sort(keywords)
-		keywords = slices.Compact(keywords)
-
-		if d.SrcID != "" {
-			var matchingArches []*artifact.Artifact
-			for _, art := range v.arches {
-				if artifact.ExtraOr(*art, artifact.ExtraID, "default") == d.SrcID {
-					if len(keywords) > 0 {
-						kw, _ := gentooArch(art.Goarch)
-						if !slices.Contains(keywords, kw) {
-							continue
-						}
-					}
-					matchingArches = append(matchingArches, art)
-				}
-			}
-
-			if len(matchingArches) == 0 {
-				if len(keywords) > 0 {
-					return nil, fmt.Errorf("gentoo %s: src_id %q does not match a selected archive for archs %v", sectionName, d.SrcID, d.Archs)
-				}
-				return nil, fmt.Errorf("gentoo %s: src_id %q does not match a selected archive", sectionName, d.SrcID)
-			}
-
-			if len(keywords) > 0 {
-				for _, kw := range keywords {
-					found := false
-					for _, art := range matchingArches {
-						artKw, _ := gentooArch(art.Goarch)
-						if artKw == kw {
-							found = true
-							break
-						}
-					}
-					if !found {
-						return nil, fmt.Errorf("gentoo %s: src_id %q does not match a selected archive for archs %v", sectionName, d.SrcID, d.Archs)
-					}
-				}
-			}
-
-			firstWrappedIn := artifact.ExtraOr(*matchingArches[0], artifact.ExtraWrappedIn, "")
-			firstBins := artifact.ExtraOr(*matchingArches[0], artifact.ExtraBinaries, []string{})
-			for _, art := range matchingArches[1:] {
-				w := artifact.ExtraOr(*art, artifact.ExtraWrappedIn, "")
-				b := artifact.ExtraOr(*art, artifact.ExtraBinaries, []string{})
-				if w != firstWrappedIn || (d.Src == "" && !slices.Equal(b, firstBins)) {
-					return nil, fmt.Errorf("gentoo %s: src_id %q has mismatched archive layouts across architectures; specify explicit src", sectionName, d.SrcID)
-				}
-			}
-
-			if d.Src != "" {
-				srcPath := d.Src
-				if firstWrappedIn != "" {
-					srcPath = path.Join(firstWrappedIn, d.Src)
-				}
-				target := d.Dst
-				sec, stateFamily, stateDir, base, err := v.decomposeItemDestination(sectionName, srcPath, d.Dst, defaultDir)
-				if err != nil {
-					return nil, err
-				}
-
-				items = append(items, installItemData{
-					Source:      srcPath,
-					Target:      target,
-					Dir:         stateDir,
-					Base:        base,
-					Use:         d.Use,
-					Keywords:    keywords,
-					Section:     sec,
-					StateFamily: stateFamily,
-				})
-			} else {
-				bins := firstBins
-				if len(bins) == 0 {
-					bins = []string{v.cfg.Name}
-				}
-				if len(bins) > 1 && d.Dst != "" {
-					return nil, fmt.Errorf("gentoo %s: dst %q cannot be used with multiple binaries %v in src_id %q; specify explicit src for each binary", sectionName, d.Dst, bins, d.SrcID)
-				}
-				for _, b := range bins {
-					sourcePath := b
-					if firstWrappedIn != "" {
-						sourcePath = path.Join(firstWrappedIn, b)
-					}
-					target := d.Dst
-					sec, stateFamily, stateDir, base, err := v.decomposeItemDestination(sectionName, sourcePath, d.Dst, defaultDir)
-					if err != nil {
-						return nil, err
-					}
-
-					items = append(items, installItemData{
-						Source:      sourcePath,
-						Target:      target,
-						Dir:         stateDir,
-						Base:        base,
-						Use:         d.Use,
-						Keywords:    keywords,
-						Section:     sec,
-						StateFamily: stateFamily,
-					})
-				}
-			}
-			continue
-		}
-
-		src := d.Src
-		if _, ok := v.extraFiles[d.Src]; ok {
-			src = "${FILESDIR}/" + strings.TrimPrefix(d.Src, "files/")
-		}
-
-		sec, stateFamily, stateDir, base, err := v.decomposeItemDestination(sectionName, src, d.Dst, defaultDir)
-		if err != nil {
-			return nil, err
-		}
-
-		items = append(items, installItemData{
-			Source:      src,
-			Target:      d.Dst,
-			Dir:         stateDir,
-			Base:        base,
-			Use:         d.Use,
-			Keywords:    keywords,
-			Section:     sec,
-			StateFamily: stateFamily,
-		})
-	}
-	return items, nil
-}
-
-func (v *ExtraFiles) processStringArray(arr []string) []string {
-	var out []string
-	for _, s := range arr {
-		if _, ok := v.extraFiles[s]; ok {
-			out = append(out, "${FILESDIR}/"+strings.TrimPrefix(s, "files/"))
-		} else {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-func (v *ExtraFiles) InstallExtraFiles(ctx *context.Context, ebuildPath string) error {
-	for name, src := range v.extraFiles {
-		destName, err := gentooExtraFilePath(name)
-		if err != nil {
-			return err
-		}
-		dst := filepath.Join(filepath.Dir(ebuildPath), destName)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
-		}
-		if err := copyFile(src, dst); err != nil {
-			return err
-		}
-		ctx.Artifacts.Add(&artifact.Artifact{
-			Name:  destName,
-			Path:  dst,
-			Type:  artifact.GentooFile,
-			Extra: gentooArtifactExtra(v.cfg.ID, path.Join(packageDir(v.cfg), filepath.ToSlash(destName)), false),
-		})
-	}
-	return nil
 }
 
 func gentooArch(goarch string) (string, error) {
@@ -551,41 +194,34 @@ func gentooArch(goarch string) (string, error) {
 	}
 }
 
-func gentooExtraFilePath(name string) (string, error) {
-	pathStr := filepath.ToSlash(name)
-	pathStr = strings.TrimPrefix(pathStr, "files/")
-	if pathStr == "" || path.IsAbs(pathStr) || pathStr != path.Clean(pathStr) || strings.HasPrefix(pathStr, "../") || pathStr == ".." {
-		return "", fmt.Errorf("extra file name %q must remain within the files directory", name)
-	}
-	return path.Join("files", pathStr), nil
-}
-
 func gentooUseFlags(cfg config.Gentoo) []config.GentooUseFlag {
 	var flags []config.GentooUseFlag
-	configured := make(map[string]struct{})
+	configured := map[string]struct{}{}
 	for _, flag := range cfg.UseFlags {
 		name := strings.TrimLeft(flag.Flag, "+-")
-		if _, ok := configured[name]; !ok {
-			configured[name] = struct{}{}
-			flags = append(flags, flag)
+		if _, ok := configured[name]; ok {
+			continue
 		}
+		configured[name] = struct{}{}
+		flags = append(flags, flag)
 	}
-
-	items := [][]config.GentooInstallItem{
+	groups := [][]config.GentooInstallItem{
 		cfg.Dobin, cfg.Doconfd, cfg.Doenvd, cfg.Doexe, cfg.Doheader, cfg.Doinitd,
 		cfg.Doins, cfg.Dosbin, cfg.Dosym, cfg.Systemd,
 	}
 	var additional []string
-	for _, group := range items {
+	for _, group := range groups {
 		for _, item := range group {
 			for _, condition := range item.Use {
 				flag := strings.TrimLeft(condition, "!+-")
-				if flag != "" {
-					if _, ok := configured[flag]; !ok {
-						configured[flag] = struct{}{}
-						additional = append(additional, flag)
-					}
+				if flag == "" {
+					continue
 				}
+				if _, ok := configured[flag]; ok {
+					continue
+				}
+				configured[flag] = struct{}{}
+				additional = append(additional, flag)
 			}
 		}
 	}

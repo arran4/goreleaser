@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/goreleaser/goreleaser/v2/internal/client"
@@ -20,6 +21,30 @@ type GentooConfig struct {
 	raw     config.Gentoo
 	version string
 }
+
+// GentooConfigs owns invariants that span configured publication targets.
+type GentooConfigs struct {
+	entries []*GentooConfig
+}
+
+func NewGentooConfigs(ctx *context.Context, raw []config.Gentoo) (*GentooConfigs, error) {
+	result := &GentooConfigs{}
+	destinations := map[string]string{}
+	for _, entry := range raw {
+		resolved, err := NewGentooConfig(ctx, entry)
+		if err != nil {
+			return nil, err
+		}
+		if previous, ok := destinations[resolved.DestinationKey()]; ok {
+			return nil, fmt.Errorf("gentoo configs %q and %q publish to the same package destination", previous, resolved.ID())
+		}
+		destinations[resolved.DestinationKey()] = resolved.ID()
+		result.entries = append(result.entries, resolved)
+	}
+	return result, nil
+}
+
+func (c *GentooConfigs) Entries() []*GentooConfig { return slices.Clone(c.entries) }
 
 func NewGentooConfig(ctx *context.Context, raw config.Gentoo) (*GentooConfig, error) {
 	version, err := convertToGentooVersion(ctx.Version, cmp.Or(raw.VersionRepresentation, "gentoo-version"))
@@ -47,14 +72,44 @@ func NewGentooConfig(ctx *context.Context, raw config.Gentoo) (*GentooConfig, er
 	return cfg, nil
 }
 
-func (c *GentooConfig) Raw() config.Gentoo  { return c.raw }
 func (c *GentooConfig) ID() string          { return c.raw.ID }
 func (c *GentooConfig) Name() string        { return c.raw.Name }
 func (c *GentooConfig) Category() string    { return c.raw.Category }
 func (c *GentooConfig) Version() string     { return c.version }
 func (c *GentooConfig) OverlayPath() string { return c.raw.OverlayPath }
+func (c *GentooConfig) Bindir() string      { return c.raw.Bindir }
 
-func (c *GentooConfig) PackageName() string { return c.Name() + "-bin" }
+func (c *GentooConfig) PackageName() string {
+	if strings.HasSuffix(c.Name(), "-bin") {
+		return c.Name()
+	}
+	return c.Name() + "-bin"
+}
+
+func (c *GentooConfig) TargetRepository() client.Repo {
+	return client.RepoFromRef(c.raw.Repository)
+}
+
+// StateRepository is the repository whose current overlay contents are read.
+// For pull requests this is the complete base identity, not the fork with only
+// its branch changed.
+func (c *GentooConfig) StateRepository() client.Repo {
+	target := c.TargetRepository()
+	if !c.raw.Repository.PullRequest.Enabled {
+		return target
+	}
+	base := c.raw.Repository.PullRequest.Base
+	if base.Owner != "" {
+		target.Owner = base.Owner
+	}
+	if base.Name != "" {
+		target.Name = base.Name
+	}
+	if base.Branch != "" {
+		target.Branch = base.Branch
+	}
+	return target
+}
 
 func (c *GentooConfig) PackageDir() string {
 	p := filepath.ToSlash(filepath.Join(c.Category(), c.PackageName()))
@@ -81,20 +136,20 @@ func (c *GentooConfig) MetaCachePath() string {
 }
 
 func (c *GentooConfig) DestinationKey() string {
-	r := c.raw.Repository
-	if r.PullRequest.Enabled {
-		if r.PullRequest.Base.Owner != "" {
-			r.Owner = r.PullRequest.Base.Owner
-		}
-		if r.PullRequest.Base.Name != "" {
-			r.Name = r.PullRequest.Base.Name
-		}
-		if r.PullRequest.Base.Branch != "" {
-			r.Branch = r.PullRequest.Base.Branch
-		}
-	}
-	return strings.Join([]string{r.Git.URL, r.Owner, r.Name, r.Branch, c.OverlayPath(), c.Category(), c.PackageName()}, "\x00")
+	r := c.StateRepository()
+	return strings.Join([]string{c.raw.Repository.Git.URL, r.Owner, r.Name, r.Branch, c.OverlayPath(), c.Category(), c.PackageName()}, "\x00")
 }
+
+func (c *GentooConfig) ArchiveIDs() []string         { return slices.Clone(c.raw.IDs) }
+func (c *GentooConfig) Keywords() config.StringArray { return slices.Clone(c.raw.Keywords) }
+func (c *GentooConfig) Description() string          { return c.raw.Description }
+func (c *GentooConfig) Homepage() string             { return c.raw.Homepage }
+func (c *GentooConfig) License() string              { return c.raw.License }
+func (c *GentooConfig) Eclasses() []string           { return slices.Clone(c.raw.Eclasses) }
+func (c *GentooConfig) MetaCache() bool              { return c.raw.MetaCache }
+func (c *GentooConfig) SkipFilesValidation() bool    { return c.raw.SkipFilesValidation }
+func (c *GentooConfig) Files() []config.ExtraFile    { return slices.Clone(c.raw.Files) }
+func (c *GentooConfig) ExtraInstall() string         { return c.raw.ExtraInstall }
 
 func (c *GentooConfig) validatePackage() error {
 	for _, p := range []string{c.PackageDir(), c.EbuildPath()} {
@@ -112,4 +167,34 @@ type GentooArtifactRef struct {
 	ConfigID  string
 	RepoPath  string
 	MetaCache bool
+}
+
+func gentooConfigByID(ctx *context.Context, id string) (config.Gentoo, error) {
+	for _, cfg := range ctx.Config.Gentoos {
+		if cfg.ID == id {
+			return cfg, nil
+		}
+	}
+	return config.Gentoo{}, fmt.Errorf("gentoo artifact references unknown config ID %q", id)
+}
+
+func packageDir(cfg config.Gentoo) string {
+	pkgName := cfg.Name
+	if cfg.Type == "bin" && !strings.HasSuffix(pkgName, "-bin") {
+		pkgName += "-bin"
+	}
+	dir := filepath.ToSlash(filepath.Join(cfg.Category, pkgName))
+	if cfg.OverlayPath != "" {
+		dir = filepath.ToSlash(filepath.Join(cfg.OverlayPath, dir))
+	}
+	return dir
+}
+
+func ebuildRelPath(cfg config.Gentoo, gentooVer string) string {
+	pkgName := cfg.Name
+	if cfg.Type == "bin" && !strings.HasSuffix(pkgName, "-bin") {
+		pkgName += "-bin"
+	}
+	dir := packageDir(cfg)
+	return filepath.ToSlash(filepath.Join(dir, fmt.Sprintf("%s-%s.ebuild", pkgName, gentooVer)))
 }
