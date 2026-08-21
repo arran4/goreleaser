@@ -133,7 +133,7 @@ func TestGiteaListDirFiltersUnsupportedContentKinds(t *testing.T) {
 		case "/api/v1/version":
 			fmt.Fprint(w, `{"version":"1.12.0"}`)
 		case "/api/v1/repos/owner/overlay/contents/pkg":
-			require.Equal(t, "main", r.URL.Query().Get("ref"))
+			assert.Equal(t, "main", r.URL.Query().Get("ref"))
 			fmt.Fprint(w, `[
 				{"name":"Manifest","type":"file"},
 				{"name":"files","type":"dir"},

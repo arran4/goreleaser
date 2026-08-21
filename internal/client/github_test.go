@@ -165,8 +165,8 @@ func TestGitHubUploadReleaseIDNotInt(t *testing.T) {
 func TestGitHubListDirFiltersUnsupportedContentKinds(t *testing.T) {
 	t.Parallel()
 	srv := githubTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v3/repos/owner/overlay/contents/pkg", r.URL.Path)
-		require.Equal(t, "main", r.URL.Query().Get("ref"))
+		assert.Equal(t, "/api/v3/repos/owner/overlay/contents/pkg", r.URL.Path)
+		assert.Equal(t, "main", r.URL.Query().Get("ref"))
 		fmt.Fprint(w, `[
 			{"name":"Manifest","type":"file"},
 			{"name":"files","type":"dir"},
