@@ -1,3 +1,7 @@
+#!/bin/bash
+
+# Overwrite metadata.go with the new one
+cat << 'EOT' > internal/pipe/gentoo/metadata.go
 package gentoo
 
 import (
@@ -130,3 +134,22 @@ func (m *Metadata) Render() ([]byte, error) {
 	header := []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE pkgmetadata SYSTEM \"https://www.gentoo.org/dtd/metadata.dtd\">\n")
 	return append(header, append(content, '\n')...), nil
 }
+EOT
+
+# Restore test files to correct version since `git reset --hard` wiped them
+cat << 'EOT' >> internal/pipe/gentoo/utils.go
+
+import "bytes"
+
+func stripComments(content []byte) []byte {
+	var result []byte
+	for line := range bytes.SplitSeq(content, []byte{'\n'}) {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) > 0 && trimmed[0] != '#' {
+			result = append(result, line...)
+			result = append(result, '\n')
+		}
+	}
+	return result
+}
+EOT

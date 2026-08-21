@@ -1,3 +1,7 @@
+#!/bin/bash
+# Ah, I replaced ebuild.go but I used the OLD ebuild.go instead of the one I generated in my script `fix_ebuild.sh`!
+# Let me regenerate `ebuild.go` correctly.
+cat << 'EOT' > internal/pipe/gentoo/ebuild.go
 package gentoo
 
 import (
@@ -351,3 +355,4 @@ func (m *MetaCache) Render(ebuildContent []byte) ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
+EOT

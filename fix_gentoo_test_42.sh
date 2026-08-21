@@ -1,7 +1,16 @@
+#!/bin/bash
+# Remove duplicate import "bytes" in utils.go which causes a syntax error.
+sed -i '/import "bytes"/d' internal/pipe/gentoo/utils.go
+sed -i 's/import (/import (\n\t"bytes"\n/g' internal/pipe/gentoo/utils.go
+
+# Overwrite retention.go
+cat << 'EOT' > internal/pipe/gentoo/retention.go
 package gentoo
 
 import (
+	"bytes"
 	"slices"
+	"strings"
 
 	"github.com/caarlos0/log"
 	"github.com/goreleaser/goreleaser/v2/pkg/config"
@@ -216,3 +225,7 @@ func (p *RetentionPlanner) Plan(ctx *goreleaser_context.Context) (*RetentionPlan
 
 	return plan, nil
 }
+EOT
+
+# Fix open PR variable shadowing
+sed -i 's/prClient, err =/prClient, err :=/g' internal/pipe/gentoo/publish.go

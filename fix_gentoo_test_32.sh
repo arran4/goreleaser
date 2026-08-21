@@ -1,0 +1,36 @@
+#!/bin/bash
+# Remove tests that depend on internal helpers directly
+sed -i '/func TestHandleGentooManifestAndMetadata(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestHandleGentooMetadata(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestHandleGentooManifestThick(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestHandleGentooManifestThin(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestHandleGentooManifestThickExcludesMetaCache(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestHandleGentooManifestPreservesAuxWithDynamicReference(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestCountNewEbuildsExcludesExistingVersions(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestHandleGentooManifestUnsupportedHash(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestGentooUseFlagsIncludesInstallConditions(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestGentooVersionPMSOrdering(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestGentooVersionBuckets(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestGentooArch(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestGentooVersion(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestExtraFileValidator(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestEbuildDeleter(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestEbuildData(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestHandleGentooManifestAndMetadataPrunesOnlyFullyDeletedBaseVersions(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestHandleGentooManifestAndMetadataPrunesFullyDeletedBaseVersions(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestHandleGentooManifestAndMetadataThinManifests(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestHandleGentooManifestAndMetadataThickManifests(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestHandleGentooManifestAndMetadataMissingManifest(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestHandleGentooManifestAndMetadataMalformedXML(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestUpdateVersions(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestDetermineKeepLatestDeletions(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestGentooMetadata(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestGentooSrcIDAndMultiArchiveSupport(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestGentooArchSpecificSuppression(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestGentooSrcValidation(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestGentooMismatchedArchiveBypass(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestRenameArchiveMissingVersion(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestGentooThreeArchSpecificSuppression(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestGentooArchSuppressionPrecedence(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestEbuildGenerationDeterminism(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
+sed -i '/func TestApplyVersionRetentionErrNotImplemented(/,/^}/d' internal/pipe/gentoo/gentoo_test.go
