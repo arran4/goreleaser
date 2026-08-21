@@ -31,63 +31,65 @@ func (Pipe) Skip(ctx *context.Context) bool {
 func (Pipe) Default(ctx *context.Context) error {
 	ids := ids.New("gentoo_overlays")
 	for i := range ctx.Config.Gentoos {
-		g := &ctx.Config.Gentoos[i]
-		g.CommitAuthor = commitauthor.Default(g.CommitAuthor)
-		if g.ID == "" {
-			g.ID = "default"
+		if err := defaultGentooConfig(ctx, &ctx.Config.Gentoos[i]); err != nil {
+			return err
 		}
-		if !g.Bin {
-			return errors.New("bin must be true")
-		}
-		if g.CommitMessageTemplate == "" {
-			g.CommitMessageTemplate = "{{ .ProjectName }}: bump to {{ .Tag }}"
-		}
-		if g.Type == "" {
-			g.Type = "bin"
-		}
-		if g.Type != "bin" {
-			return fmt.Errorf("invalid gentoo type %q: currently only \"bin\" is supported", g.Type)
-		}
-		if g.Type == "bin" && g.Bindir == "" {
-			g.Bindir = "/opt/bin"
-		} else if g.Bindir == "" {
-			g.Bindir = "/usr/bin"
-		}
-		if g.License == "" {
-			return errors.New("license is required")
-		}
-		if strings.TrimSpace(g.Description) == "" {
-			g.Description = ctx.Config.ProjectName
-		}
-		if strings.TrimSpace(g.Description) == "" {
-			return errors.New("description is required")
-		}
-		if g.ConflictResolution == "" {
-			g.ConflictResolution = config.ConflictResolutionRevision
-		}
-		if g.ConflictResolution != config.ConflictResolutionFail &&
-			g.ConflictResolution != config.ConflictResolutionOverwrite &&
-			g.ConflictResolution != config.ConflictResolutionRevision {
-			return fmt.Errorf("conflict_resolution %q is not valid, must be one of [Fail, Overwrite, Revision]", g.ConflictResolution)
-		}
-		if g.KeepVersions < 0 {
-			return errors.New("keep_versions must be greater than or equal to 0")
-		}
-		if g.VersionRetentionStrategy != "" && g.VersionRetentionStrategy != config.VersionRetentionStrategyKeepLatest && g.VersionRetentionStrategy != config.VersionRetentionStrategyKeepPrereleases {
-			return fmt.Errorf("version_retention_strategy %q is not valid, must be one of [keep_latest, keep_prereleases]", g.VersionRetentionStrategy)
-		}
-		if g.KeepVersions > 0 && g.VersionRetentionStrategy == "" {
-			return errors.New("version_retention_strategy must be provided if keep_versions > 0")
-		}
-		if g.Name == "" {
-			g.Name = ctx.Config.ProjectName
-		}
-		if g.Category == "" {
-			g.Category = "app-misc"
-		}
-		ids.Inc(g.ID)
+		ids.Inc(ctx.Config.Gentoos[i].ID)
 	}
 	return ids.Validate()
+}
+
+func defaultGentooConfig(ctx *context.Context, g *config.Gentoo) error {
+	g.CommitAuthor = commitauthor.Default(g.CommitAuthor)
+	if g.ID == "" {
+		g.ID = "default"
+	}
+	if !g.Bin {
+		return errors.New("bin must be true")
+	}
+	if g.CommitMessageTemplate == "" {
+		g.CommitMessageTemplate = "{{ .ProjectName }}: bump to {{ .Tag }}"
+	}
+	if g.Type == "" {
+		g.Type = "bin"
+	}
+	if g.Type != "bin" {
+		return fmt.Errorf("invalid gentoo type %q: currently only \"bin\" is supported", g.Type)
+	}
+	if g.Bindir == "" {
+		g.Bindir = "/opt/bin"
+	}
+	if g.License == "" {
+		return errors.New("license is required")
+	}
+	if strings.TrimSpace(g.Description) == "" {
+		g.Description = ctx.Config.ProjectName
+	}
+	if strings.TrimSpace(g.Description) == "" {
+		return errors.New("description is required")
+	}
+	if g.ConflictResolution == "" {
+		g.ConflictResolution = config.ConflictResolutionRevision
+	}
+	if g.ConflictResolution != config.ConflictResolutionFail && g.ConflictResolution != config.ConflictResolutionOverwrite && g.ConflictResolution != config.ConflictResolutionRevision {
+		return fmt.Errorf("conflict_resolution %q is not valid, must be one of [Fail, Overwrite, Revision]", g.ConflictResolution)
+	}
+	if g.KeepVersions < 0 {
+		return errors.New("keep_versions must be greater than or equal to 0")
+	}
+	if g.VersionRetentionStrategy != "" && g.VersionRetentionStrategy != config.VersionRetentionStrategyKeepLatest && g.VersionRetentionStrategy != config.VersionRetentionStrategyKeepPrereleases {
+		return fmt.Errorf("version_retention_strategy %q is not valid, must be one of [keep_latest, keep_prereleases]", g.VersionRetentionStrategy)
+	}
+	if g.KeepVersions > 0 && g.VersionRetentionStrategy == "" {
+		return errors.New("version_retention_strategy must be provided if keep_versions > 0")
+	}
+	if g.Name == "" {
+		g.Name = ctx.Config.ProjectName
+	}
+	if g.Category == "" {
+		g.Category = "app-misc"
+	}
+	return nil
 }
 
 func (Pipe) Run(ctx *context.Context) error {

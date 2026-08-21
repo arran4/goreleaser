@@ -265,6 +265,19 @@ func TestGitClient(t *testing.T) {
 	})
 }
 
+func TestGitClientListDirIncludesDirectories(t *testing.T) {
+	dist := t.TempDir()
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{Dist: dist})
+	directory := filepath.Join(dist, "git", "overlay-main", "app-misc", "foo-bin")
+	require.NoError(t, os.MkdirAll(filepath.Join(directory, "files"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "foo-bin-1.0.ebuild"), []byte("EAPI=8\n"), 0o644))
+
+	client := &gitClient{branch: "main"}
+	names, err := client.ListDir(ctx, Repo{Name: "overlay"}, "app-misc/foo-bin")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"files", "foo-bin-1.0.ebuild"}, names)
+}
+
 func TestKeyPath(t *testing.T) {
 	t.Parallel()
 

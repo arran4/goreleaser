@@ -1,9 +1,9 @@
 package gentoo
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/caarlos0/log"
@@ -22,36 +22,44 @@ type publicationInput struct {
 
 func collectPublicationInputs(ctx *context.Context) ([]publicationInput, error) {
 	artifacts := ctx.Artifacts.Filter(artifact.Or(artifact.ByType(artifact.GentooEbuild), artifact.ByType(artifact.GentooFile))).List()
-	byID := map[string]*publicationInput{}
+	byID := map[string]int{}
 	var result []publicationInput
 	for _, art := range artifacts {
 		generated, err := GeneratedFileFromArtifact(*art)
 		if err != nil {
 			return nil, err
 		}
-		raw, err := gentooConfigByID(ctx, generated.ConfigID)
-		if err != nil {
-			return nil, err
-		}
-		skip, err := tmpl.New(ctx).Apply(raw.SkipUpload)
-		if err != nil {
-			return nil, err
-		}
-		if strings.TrimSpace(skip) == "true" || strings.TrimSpace(skip) == "auto" && ctx.Semver.Prerelease != "" {
-			continue
-		}
-		input := byID[generated.ConfigID]
-		if input == nil {
+		index, ok := byID[generated.ConfigID]
+		if !ok {
+			raw, err := gentooConfigByID(ctx, generated.ConfigID)
+			if err != nil {
+				return nil, err
+			}
+			skip, err := tmpl.New(ctx).Apply(publicationConfigFrom(raw).skipUpload)
+			if err != nil {
+				return nil, err
+			}
+			if strings.TrimSpace(skip) == "true" || strings.TrimSpace(skip) == "auto" && ctx.Semver.Prerelease != "" {
+				byID[generated.ConfigID] = -1
+				continue
+			}
 			cfg, err := NewGentooConfig(ctx, raw)
 			if err != nil {
 				return nil, err
 			}
 			result = append(result, publicationInput{cfg: cfg})
-			input = &result[len(result)-1]
-			byID[generated.ConfigID] = input
+			index = len(result) - 1
+			byID[generated.ConfigID] = index
 		}
-		input.files = append(input.files, generated)
+		if index < 0 {
+			continue
+		}
+		result[index].files = append(result[index].files, generated)
 	}
+	for i := range result {
+		slices.SortFunc(result[i].files, func(a, b GeneratedFile) int { return strings.Compare(a.RepoPath, b.RepoPath) })
+	}
+	slices.SortFunc(result, func(a, b publicationInput) int { return strings.Compare(a.cfg.ID(), b.cfg.ID()) })
 	return result, nil
 }
 
@@ -65,29 +73,31 @@ type Publisher struct {
 	author  config.CommitAuthor
 	message string
 	base    client.Client
+	config  publicationConfig
 }
 
 func NewPublisher(ctx *context.Context, cfg *GentooConfig, files []GeneratedFile, base client.Client) (*Publisher, error) {
-	message, err := tmpl.New(ctx).Apply(cfg.raw.CommitMessageTemplate)
+	publication := cfg.publication()
+	message, err := tmpl.New(ctx).Apply(publication.commitMessage)
 	if err != nil {
 		return nil, err
 	}
-	author, err := commitauthor.Get(ctx, cfg.raw.CommitAuthor)
+	author, err := commitauthor.Get(ctx, publication.commitAuthor)
 	if err != nil {
 		return nil, err
 	}
-	provider, err := client.NewIfToken(ctx, base, cfg.raw.Repository.Token)
+	provider, err := client.NewIfToken(ctx, base, publication.repository.Token)
 	if err != nil {
 		return nil, err
 	}
 	target := NewRepository(provider, cfg.TargetRepository())
 	var stateProvider any = provider
-	if cfg.raw.Repository.Git.URL != "" {
+	if publication.repository.Git.URL != "" {
 		gitClient := client.NewGitUploadClient(cfg.StateRepository().Branch)
 		stateProvider = gitClient
 	}
 	state := NewRepositoryState(NewRepository(stateProvider, cfg.StateRepository()), cfg)
-	return &Publisher{cfg: cfg, files: files, target: target, state: state, author: author, message: message, base: base}, nil
+	return &Publisher{cfg: cfg, files: files, target: target, state: state, author: author, message: message, base: base, config: publication}, nil
 }
 
 func (p *Publisher) Publish(ctx *context.Context) error {
@@ -105,7 +115,7 @@ func (p *Publisher) Publish(ctx *context.Context) error {
 }
 
 func (p *Publisher) Sync(ctx *context.Context) error {
-	if !p.cfg.raw.Repository.PullRequest.Enabled {
+	if !p.config.repository.PullRequest.Enabled {
 		return nil
 	}
 	if err := p.target.Sync(ctx, p.state.Repository()); err != nil {
@@ -119,61 +129,47 @@ func (p *Publisher) Prepare(ctx *context.Context) (*ChangeSet, error) {
 	if err != nil {
 		return nil, err
 	}
-	retention := &retentionCoordinator{cfg: p.cfg.raw, files: changes.Files()}
-	deleted, err := retention.applyVersionRetention(ctx, p.state.Repository().Client(), p.state.Repository().Repo())
+	retentionState, err := p.state.Retention(ctx, changes)
 	if err != nil {
 		return nil, err
 	}
-	settings, err := loadOverlaySettings(ctx, p.cfg.raw, p.state.Repository().Client(), p.state.Repository().Repo())
+	retention, err := NewRetentionPlanner(p.cfg, retentionState, changes).Plan()
 	if err != nil {
 		return nil, err
 	}
-	if !settings.ThinManifests() {
-		reconstruct, reconstructErr := p.state.NeedsThickReconstruction(ctx)
-		if reconstructErr != nil {
-			return nil, reconstructErr
-		}
-		if reconstruct {
-			retained, retainedErr := p.state.PackageFiles(ctx)
-			if retainedErr != nil {
-				return nil, fmt.Errorf("cannot reconstruct thick Manifest from retained package files: %w", retainedErr)
-			}
-			retention.files = appendMissingPackageFiles(retention.files, retained)
-		}
-	}
-	retention.files = p.filterMetaCache(retention.files, settings)
-	planned := NewChangeSet(retention.files...)
-	if err := prepareManifestAndMetadata(ctx, p.cfg.raw, p.state.Repository().Client(), p.state.Repository().Repo(), planned, deleted); err != nil {
+	layout, err := p.state.Layout(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return NewChangeSet(withoutRetainedFiles(planned.Files())...), nil
-}
-
-func appendMissingPackageFiles(files, retained []client.RepoFile) []client.RepoFile {
-	for _, candidate := range retained {
-		found := false
-		for _, file := range files {
-			if file.Path == candidate.Path {
-				found = true
-				break
-			}
+	planned := p.filterMetaCache(retention.Changes, layout)
+	metadataConfig := p.cfg.metadata()
+	if !metadataConfig.Empty() {
+		metadata, metadataErr := p.state.Metadata(ctx)
+		if metadataErr != nil {
+			return nil, metadataErr
 		}
-		if !found {
-			files = append(files, candidate)
+		if err := prepareMetadata(metadata, metadataConfig, planned, p.cfg.MetadataPath()); err != nil {
+			return nil, err
 		}
 	}
-	return files
-}
-
-func withoutRetainedFiles(files []client.RepoFile) []client.RepoFile {
-	result := files[:0]
-	for _, file := range files {
-		if file.Identifier == "gentoo-retained" {
-			continue
-		}
-		result = append(result, file)
+	manifest, err := p.state.Manifest(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return result
+	var packageFiles []client.RepoFile
+	if !layout.ThinManifests() {
+		packageFiles, err = p.state.PackageFiles(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("cannot construct thick Manifest from retained package files: %w", err)
+		}
+	}
+	planner := NewManifestPlanner(p.cfg, layout, manifest).
+		WithPackageState(packageFiles, retention.RetainedEbuilds, retention.Deletes).
+		WithDistfiles(ReleaseDistfiles(ctx, p.cfg))
+	if err := planner.Apply(planned); err != nil {
+		return nil, err
+	}
+	return planned, nil
 }
 
 func (p *Publisher) incomingChanges() (*ChangeSet, error) {
@@ -188,25 +184,24 @@ func (p *Publisher) incomingChanges() (*ChangeSet, error) {
 	return changes, nil
 }
 
-func (p *Publisher) filterMetaCache(files []client.RepoFile, settings Layout) []client.RepoFile {
+func (p *Publisher) filterMetaCache(changes *ChangeSet, settings Layout) *ChangeSet {
 	allowed := settings.SupportsMetaCache()
 	if p.cfg.MetaCache() && !allowed {
 		log.Warnf("gentoo.meta_cache is true for %q, but overlay metadata/layout.conf disables cache-formats", p.cfg.ID())
 	}
 	prefix := filepath.ToSlash(filepath.Join(p.cfg.OverlayPath(), "metadata", "md5-cache")) + "/"
-	result := files[:0]
-	for _, file := range files {
+	result := changes.Clone()
+	for _, file := range changes.Files() {
 		isCacheWrite := strings.HasPrefix(filepath.ToSlash(file.Path), prefix) && !file.Delete
 		if isCacheWrite && (!p.cfg.MetaCache() || !allowed) {
-			continue
+			result.Remove(file.Path)
 		}
-		result = append(result, file)
 	}
 	return result
 }
 
 func (p *Publisher) Write(ctx *context.Context, changes *ChangeSet) error {
-	if p.cfg.raw.Repository.Git.URL == "" {
+	if p.config.repository.Git.URL == "" {
 		return p.target.Write(ctx, p.author, p.message, changes)
 	}
 	gitClient := client.NewGitUploadClient(p.target.Repo().Branch)
@@ -214,7 +209,7 @@ func (p *Publisher) Write(ctx *context.Context, changes *ChangeSet) error {
 }
 
 func (p *Publisher) OpenPullRequest(ctx *context.Context) error {
-	pr := p.cfg.raw.Repository.PullRequest
+	pr := p.config.repository.PullRequest
 	if !pr.Enabled {
 		return nil
 	}
@@ -222,9 +217,6 @@ func (p *Publisher) OpenPullRequest(ctx *context.Context) error {
 	if err != nil {
 		return err
 	}
-	opener, ok := any(provider).(client.PullRequestOpener)
-	if !ok {
-		return errors.New("client does not support pull requests")
-	}
-	return opener.OpenPullRequest(ctx, p.state.Repository().Repo(), p.target.Repo(), p.message, pr.Draft)
+	base := NewRepository(provider, p.state.Repository().Repo())
+	return base.OpenPullRequest(ctx, p.target, p.message, pr.Draft)
 }

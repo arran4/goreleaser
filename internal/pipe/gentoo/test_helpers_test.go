@@ -1,8 +1,9 @@
 package gentoo
 
 import (
-	"path"
+	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/goreleaser/goreleaser/v2/internal/artifact"
 	"github.com/goreleaser/goreleaser/v2/internal/client"
@@ -18,7 +19,7 @@ func newExtraFilesProcessor(cfg config.Gentoo, artifacts []*artifact.Artifact, f
 		arch, _ := gentooArch(art.Goarch)
 		binaries := artifact.ExtraOr(*art, artifact.ExtraBinaries, []string{})
 		release.archives = append(release.archives, &Archive{
-			artifact: art, id: artifact.ExtraOr(*art, artifact.ExtraID, "default"), goarch: art.Goarch, gentooArch: arch,
+			name: art.Name, sourcePath: art.Path, id: artifact.ExtraOr(*art, artifact.ExtraID, "default"), goarch: art.Goarch, gentooArch: arch,
 			wrappedIn: artifact.ExtraOr(*art, artifact.ExtraWrappedIn, ""), binaries: binaries,
 			files: artifact.ExtraOr(*art, artifact.ExtraFiles, []string{}),
 		})
@@ -41,17 +42,7 @@ func (f *ExtraFiles) inArchives(name string) bool {
 		return false
 	}
 	for _, archive := range f.release.archives {
-		art := archive.artifact
-		wrapped := artifact.ExtraOr(*art, artifact.ExtraWrappedIn, "")
-		found := false
-		candidates := append(artifact.ExtraOr(*art, artifact.ExtraFiles, []string{}), artifact.ExtraOr(*art, artifact.ExtraBinaries, []string{})...)
-		for _, candidate := range candidates {
-			if normalizeArchivePath(path.Join(wrapped, candidate)) == normalizeArchivePath(name) {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !archive.Contains(name) {
 			return false
 		}
 	}
@@ -112,7 +103,40 @@ func gentooArtifactExtra(configID, repoPath string) map[string]any {
 
 func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, repoClient any, files *[]client.RepoFile, deleted []string) error {
 	changes := NewChangeSet((*files)...)
-	if err := prepareManifestAndMetadata(ctx, cfg, repoClient, client.Repo{}, changes, deleted); err != nil {
+	if cfg.Type == "" {
+		cfg.Type = "bin"
+	}
+	version := ctx.Version
+	if version == "" {
+		version = "0"
+	}
+	resolved := &GentooConfig{raw: cfg, version: version}
+	state := NewRepositoryState(NewRepository(repoClient, client.Repo{}), resolved)
+	layout, err := state.Layout(ctx)
+	if err != nil {
+		return err
+	}
+	metadata, err := state.Metadata(ctx)
+	if err != nil {
+		return err
+	}
+	if err := prepareMetadata(metadata, resolved.metadata(), changes, resolved.MetadataPath()); err != nil {
+		return err
+	}
+	manifest, err := state.Manifest(ctx)
+	if err != nil {
+		return err
+	}
+	var retained []string
+	for _, file := range changes.Files() {
+		if !file.Delete && strings.HasSuffix(file.Path, ".ebuild") {
+			retained = append(retained, filepath.Base(file.Path))
+		}
+	}
+	planner := NewManifestPlanner(resolved, layout, manifest).
+		WithPackageState(nil, retained, deleted).
+		WithDistfiles(ReleaseDistfiles(ctx, resolved))
+	if err := planner.Apply(changes); err != nil {
 		return err
 	}
 	*files = changes.Files()

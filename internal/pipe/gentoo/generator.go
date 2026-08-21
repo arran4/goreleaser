@@ -92,7 +92,7 @@ func (g *Generator) newEbuild(release *Release, plan *InstallProgram, extraInsta
 	return Ebuild{
 		Name: g.cfg.Name(), Description: g.cfg.Description(), Homepage: g.cfg.Homepage(), License: g.cfg.License(),
 		Keywords: strings.Join(keywords, " "), Bindir: g.cfg.Bindir(), ExtraInstall: extraInstall,
-		Archs: release.templateArchitectures(), UseFlags: gentooUseFlags(g.cfg.raw), Eclasses: eclasses, Plan: plan,
+		Archs: release.templateArchitectures(), UseFlags: g.cfg.UseFlags(), Eclasses: eclasses, Plan: plan,
 	}
 }
 
@@ -129,6 +129,8 @@ func (g *Generator) writeMetaCache(ebuild Ebuild, content string) (GeneratedFile
 		return GeneratedFile{}, false, nil
 	}
 	if ebuild.HasEclasses() {
+		// A synthetic cache cannot reproduce metadata contributed by inherited
+		// eclasses, so cache generation remains best-effort and conservative.
 		log.Warnf("gentoo: meta_cache is enabled for %q, but ebuild %q inherits eclasses; skipping metadata cache generation", g.cfg.ID(), strings.TrimSuffix(filepath.Base(g.cfg.EbuildPath()), ".ebuild"))
 		return GeneratedFile{}, false, nil
 	}

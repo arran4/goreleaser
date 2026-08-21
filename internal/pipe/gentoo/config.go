@@ -22,6 +22,37 @@ type GentooConfig struct {
 	version string
 }
 
+// publicationConfig is the immutable publication view of a resolved Gentoo
+// configuration. It keeps provider credentials at the publication boundary
+// without exposing the complete config to domain planners.
+type publicationConfig struct {
+	repository    config.RepoRef
+	commitAuthor  config.CommitAuthor
+	commitMessage string
+	skipUpload    string
+}
+
+type retentionPolicy struct {
+	conflictResolution config.ConflictResolution
+	strategy           config.VersionRetentionStrategy
+	keepVersions       int
+}
+
+type metadataConfig struct {
+	maintainers []config.GentooMaintainer
+	useFlags    []config.GentooUseFlag
+	bugsTo      string
+}
+
+func (c metadataConfig) Empty() bool {
+	return len(c.maintainers) == 0 && len(c.useFlags) == 0 && c.bugsTo == ""
+}
+
+type manifestConfig struct {
+	hashes []string
+	thin   *bool
+}
+
 // GentooConfigs owns invariants that span configured publication targets.
 type GentooConfigs struct {
 	entries []*GentooConfig
@@ -29,12 +60,17 @@ type GentooConfigs struct {
 
 func NewGentooConfigs(ctx *context.Context, raw []config.Gentoo) (*GentooConfigs, error) {
 	result := &GentooConfigs{}
+	configuredIDs := map[string]struct{}{}
 	destinations := map[string]string{}
 	for _, entry := range raw {
 		resolved, err := NewGentooConfig(ctx, entry)
 		if err != nil {
 			return nil, err
 		}
+		if _, exists := configuredIDs[resolved.ID()]; exists {
+			return nil, fmt.Errorf("gentoo config ID %q is duplicated", resolved.ID())
+		}
+		configuredIDs[resolved.ID()] = struct{}{}
 		if previous, ok := destinations[resolved.DestinationKey()]; ok {
 			return nil, fmt.Errorf("gentoo configs %q and %q publish to the same package destination", previous, resolved.ID())
 		}
@@ -132,11 +168,19 @@ func (c *GentooConfig) ManifestPath() string {
 }
 
 func (c *GentooConfig) MetaCachePath() string {
-	return filepath.ToSlash(filepath.Join(c.OverlayPath(), "metadata", "md5-cache", c.Category(), c.PackageName()+"-"+c.Version()))
+	return c.MetaCachePathForVersion(c.Version())
+}
+
+func (c *GentooConfig) MetaCacheDir() string {
+	return filepath.ToSlash(filepath.Join(c.OverlayPath(), "metadata", "md5-cache", c.Category()))
+}
+
+func (c *GentooConfig) MetaCachePathForVersion(version string) string {
+	return filepath.ToSlash(filepath.Join(c.MetaCacheDir(), c.PackageName()+"-"+version))
 }
 
 func (c *GentooConfig) DestinationKey() string {
-	r := c.StateRepository()
+	r := c.TargetRepository()
 	return strings.Join([]string{c.raw.Repository.Git.URL, r.Owner, r.Name, r.Branch, c.OverlayPath(), c.Category(), c.PackageName()}, "\x00")
 }
 
@@ -151,7 +195,121 @@ func (c *GentooConfig) SkipFilesValidation() bool    { return c.raw.SkipFilesVal
 func (c *GentooConfig) Files() []config.ExtraFile    { return slices.Clone(c.raw.Files) }
 func (c *GentooConfig) ExtraInstall() string         { return c.raw.ExtraInstall }
 
+func (c *GentooConfig) installSections() []installSection {
+	return []installSection{
+		{name: "dobin", items: slices.Clone(c.raw.Dobin)},
+		{name: "doconfd", items: slices.Clone(c.raw.Doconfd)},
+		{name: "doenvd", items: slices.Clone(c.raw.Doenvd)},
+		{name: "doexe", items: slices.Clone(c.raw.Doexe), defaultDir: c.Bindir()},
+		{name: "doheader", items: slices.Clone(c.raw.Doheader)},
+		{name: "doinitd", items: slices.Clone(c.raw.Doinitd)},
+		{name: "doins", items: slices.Clone(c.raw.Doins), defaultDir: "/"},
+		{name: "dosbin", items: slices.Clone(c.raw.Dosbin)},
+		{name: "dosym", items: slices.Clone(c.raw.Dosym)},
+		{name: "systemd", items: slices.Clone(c.raw.Systemd)},
+	}
+}
+
+func (c *GentooConfig) Directories() []string { return slices.Clone(c.raw.Dodir) }
+func (c *GentooConfig) Manpages() []string    { return slices.Clone(c.raw.Doman) }
+func (c *GentooConfig) Docs() []string        { return slices.Clone(c.raw.Dodoc) }
+func (c *GentooConfig) UseFlags() []config.GentooUseFlag {
+	return gentooUseFlags(c.raw)
+}
+
+func gentooUseFlags(cfg config.Gentoo) []config.GentooUseFlag {
+	var flags []config.GentooUseFlag
+	configured := map[string]struct{}{}
+	for _, flag := range cfg.UseFlags {
+		name := strings.TrimLeft(flag.Flag, "+-")
+		if _, ok := configured[name]; ok {
+			continue
+		}
+		configured[name] = struct{}{}
+		flags = append(flags, flag)
+	}
+	groups := [][]config.GentooInstallItem{
+		cfg.Dobin, cfg.Doconfd, cfg.Doenvd, cfg.Doexe, cfg.Doheader, cfg.Doinitd,
+		cfg.Doins, cfg.Dosbin, cfg.Dosym, cfg.Systemd,
+	}
+	var additional []string
+	for _, group := range groups {
+		for _, item := range group {
+			for _, condition := range item.Use {
+				flag := strings.TrimLeft(condition, "!+-")
+				if flag == "" {
+					continue
+				}
+				if _, ok := configured[flag]; ok {
+					continue
+				}
+				configured[flag] = struct{}{}
+				additional = append(additional, flag)
+			}
+		}
+	}
+	slices.Sort(additional)
+	for _, flag := range additional {
+		flags = append(flags, config.GentooUseFlag{Flag: flag})
+	}
+	return flags
+}
+
+func (c *GentooConfig) publication() publicationConfig {
+	return publicationConfigFrom(c.raw)
+}
+
+func publicationConfigFrom(raw config.Gentoo) publicationConfig {
+	return publicationConfig{
+		repository:    raw.Repository,
+		commitAuthor:  raw.CommitAuthor,
+		commitMessage: raw.CommitMessageTemplate,
+		skipUpload:    raw.SkipUpload,
+	}
+}
+
+func (c *GentooConfig) retention() retentionPolicy {
+	return retentionPolicy{
+		conflictResolution: c.raw.ConflictResolution,
+		strategy:           c.raw.VersionRetentionStrategy,
+		keepVersions:       c.raw.KeepVersions,
+	}
+}
+
+func (c *GentooConfig) metadata() metadataConfig {
+	return metadataConfig{
+		maintainers: slices.Clone(c.raw.Maintainers),
+		useFlags:    slices.Clone(c.raw.UseFlags),
+		bugsTo:      c.raw.BugsTo,
+	}
+}
+
+func (c *GentooConfig) manifest() manifestConfig {
+	return manifestConfig{hashes: slices.Clone(c.raw.ManifestHashes), thin: c.raw.ThinManifests}
+}
+
 func (c *GentooConfig) validatePackage() error {
+	fields := []struct {
+		label string
+		value string
+	}{
+		{label: "overlay_path", value: c.OverlayPath()},
+		{label: "category", value: c.Category()},
+		{label: "name", value: c.Name()},
+	}
+	for _, field := range fields {
+		label, value := field.label, field.value
+		if value == "" && label == "overlay_path" {
+			continue
+		}
+		clean := filepath.ToSlash(filepath.Clean(value))
+		if filepath.IsAbs(value) || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
+			return fmt.Errorf("%s %q must remain within the overlay", label, value)
+		}
+		if label == "name" && strings.Contains(clean, "/") {
+			return fmt.Errorf("name %q must be a package name, not a path", value)
+		}
+	}
 	for _, p := range []string{c.PackageDir(), c.EbuildPath()} {
 		clean := filepath.ToSlash(filepath.Clean(p))
 		if strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
@@ -176,25 +334,4 @@ func gentooConfigByID(ctx *context.Context, id string) (config.Gentoo, error) {
 		}
 	}
 	return config.Gentoo{}, fmt.Errorf("gentoo artifact references unknown config ID %q", id)
-}
-
-func packageDir(cfg config.Gentoo) string {
-	pkgName := cfg.Name
-	if cfg.Type == "bin" && !strings.HasSuffix(pkgName, "-bin") {
-		pkgName += "-bin"
-	}
-	dir := filepath.ToSlash(filepath.Join(cfg.Category, pkgName))
-	if cfg.OverlayPath != "" {
-		dir = filepath.ToSlash(filepath.Join(cfg.OverlayPath, dir))
-	}
-	return dir
-}
-
-func ebuildRelPath(cfg config.Gentoo, gentooVer string) string {
-	pkgName := cfg.Name
-	if cfg.Type == "bin" && !strings.HasSuffix(pkgName, "-bin") {
-		pkgName += "-bin"
-	}
-	dir := packageDir(cfg)
-	return filepath.ToSlash(filepath.Join(dir, fmt.Sprintf("%s-%s.ebuild", pkgName, gentooVer)))
 }

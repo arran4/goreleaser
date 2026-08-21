@@ -63,39 +63,25 @@ func (p *InstallPlanner) Plan() (*InstallProgram, error) {
 	if err := p.resolveExplicit(); err != nil {
 		return nil, err
 	}
-	automatic := p.automaticBinaries()
-	raw := p.cfg.raw
-	program := buildInstallPlan(
-		p.cfg.Bindir(),
-		p.release.Architectures(),
-		p.extraInstall,
-		automatic,
-		p.installers,
-		raw.Dodir,
-		p.extras.ResolveAll(raw.Doman),
-		p.extras.ResolveAll(raw.Dodoc),
-	)
-	return program.Reduce(), program.Validate()
-}
-
-func (p *InstallPlanner) sections() []installSection {
-	raw := p.cfg.raw
-	return []installSection{
-		{name: "dobin", items: raw.Dobin},
-		{name: "doconfd", items: raw.Doconfd},
-		{name: "doenvd", items: raw.Doenvd},
-		{name: "doexe", items: raw.Doexe, defaultDir: p.cfg.Bindir()},
-		{name: "doheader", items: raw.Doheader},
-		{name: "doinitd", items: raw.Doinitd},
-		{name: "doins", items: raw.Doins, defaultDir: "/"},
-		{name: "dosbin", items: raw.Dosbin},
-		{name: "dosym", items: raw.Dosym},
-		{name: "systemd", items: raw.Systemd},
+	builder := installProgramBuilder{
+		bindir:        p.cfg.Bindir(),
+		architectures: p.release.Architectures(),
+		extraInstall:  p.extraInstall,
+		automatic:     p.automaticBinaries(),
+		explicit:      p.installers,
+		directories:   p.cfg.Directories(),
+		manpages:      p.extras.ResolveAll(p.cfg.Manpages()),
+		docs:          p.extras.ResolveAll(p.cfg.Docs()),
 	}
+	reduced := builder.Build().Reduce()
+	if err := reduced.Validate(); err != nil {
+		return nil, err
+	}
+	return reduced, nil
 }
 
 func (p *InstallPlanner) resolveExplicit() error {
-	for _, section := range p.sections() {
+	for _, section := range p.cfg.installSections() {
 		for _, item := range section.items {
 			resolved, err := p.resolveItem(section, item)
 			if err != nil {
@@ -274,149 +260,138 @@ type installData struct {
 	Keywords []string
 }
 
-func buildInstallPlan(
-	bindir string,
-	keywordsList []string,
-	extraInstall string,
-	installByKw map[string][]installData,
-	installers []installItemData,
-	dodir []string,
-	doman []string,
-	dodoc []string,
-) *InstallProgram {
-	var stmts []installStmt
+type installProgramBuilder struct {
+	bindir        string
+	architectures []string
+	extraInstall  string
+	automatic     map[string][]installData
+	explicit      []installItemData
+	directories   []string
+	manpages      []string
+	docs          []string
+	statements    []installStmt
+}
 
-	if extraInstall != "" {
-		stmts = append(stmts, rawStmt{Content: extraInstall})
+func (b *installProgramBuilder) Build() *InstallProgram {
+	b.addExtraInstall()
+	b.addDirectories()
+	b.addAutomaticBinaries()
+	b.addExplicitInstalls()
+	b.addManpages()
+	b.addDocs()
+	return &InstallProgram{UniverseArchitectures: b.architectures, Body: b.statements}
+}
+
+func (b *installProgramBuilder) addExtraInstall() {
+	if b.extraInstall != "" {
+		b.statements = append(b.statements, rawStmt{Content: b.extraInstall})
 	}
+}
 
-	for _, dir := range dodir {
-		stmts = append(stmts, actionStmt{
-			Op:     OpDodir,
-			Source: dir,
-		})
+func (b *installProgramBuilder) addDirectories() {
+	for _, directory := range b.directories {
+		b.statements = append(b.statements, actionStmt{Op: OpDodir, Source: directory})
 	}
+}
 
-	if bindir != "" && len(installByKw) > 0 {
-		stmts = append(stmts, stateStmt{
-			Family: StateFamilyExe,
-			Value:  bindir,
-		})
+func (b *installProgramBuilder) addAutomaticBinaries() {
+	if len(b.automatic) == 0 {
+		return
 	}
-
-	if len(installByKw) > 0 {
-		groupMap := make(map[string][]string)
-		installItemsMap := make(map[string][]installData)
-
-		for _, kw := range keywordsList {
-			installs := installByKw[kw]
-			if len(installs) == 0 {
-				continue
-			}
-			var keyParts []string
-			for _, inst := range installs {
-				keyParts = append(keyParts, inst.Source+":"+inst.Target)
-			}
-			groupKey := strings.Join(keyParts, ";")
-			groupMap[groupKey] = append(groupMap[groupKey], kw)
-			installItemsMap[groupKey] = installs
+	if b.bindir != "" {
+		b.statements = append(b.statements, stateStmt{Family: StateFamilyExe, Value: b.bindir})
+	}
+	groups := b.automaticGroups()
+	for _, group := range groups {
+		body := make([]installStmt, 0, len(group.installs))
+		for _, install := range group.installs {
+			body = append(body, automaticInstallStatement(install, b.bindir))
 		}
-
-		groupKeys := make([]string, 0, len(groupMap))
-		for groupKey := range groupMap {
-			groupKeys = append(groupKeys, groupKey)
-		}
-		slices.Sort(groupKeys)
-
-		for _, groupKey := range groupKeys {
-			kws := groupMap[groupKey]
-			slices.Sort(kws)
-			installs := installItemsMap[groupKey]
-
-			var body []installStmt
-			for _, inst := range installs {
-				isRename := inst.Source != inst.Target && !strings.HasSuffix(inst.Source, "/"+inst.Target)
-				op := OpDoexe
-				if isRename {
-					op = OpNewexe
-				}
-				dieMsg := "Failed to install binary"
-				target := ""
-				if isRename {
-					dieMsg = "Failed to install " + inst.Target
-					target = inst.Target
-				}
-				body = append(body, actionStmt{
-					Op:            op,
-					Source:        inst.Source,
-					Target:        target,
-					Die:           dieMsg,
-					RequiredState: StateRequirement{Family: StateFamilyExe, Value: bindir},
-				})
-			}
-
-			if len(kws) > 0 {
-				stmts = append(stmts, conditionStmt{
-					Expr: newArchsAndUseExpr(kws, nil),
-					Body: body,
-				})
-			} else {
-				stmts = append(stmts, body...)
-			}
-		}
+		b.statements = append(b.statements, conditionStmt{Expr: newArchsAndUseExpr(group.architectures, nil), Body: body})
 	}
+}
 
-	for _, inst := range installers {
-		var condBody []installStmt
-		if inst.StateFamily != StateFamilyNone && inst.Dir != "" {
-			condBody = append(condBody, stateStmt{
-				Family: inst.StateFamily,
-				Value:  inst.Dir,
-			})
+type automaticInstallGroup struct {
+	architectures []string
+	installs      []installData
+}
+
+func (b *installProgramBuilder) automaticGroups() []automaticInstallGroup {
+	byKey := map[string]*automaticInstallGroup{}
+	for _, architecture := range b.architectures {
+		installs := b.automatic[architecture]
+		if len(installs) == 0 {
+			continue
 		}
-
-		isRename := inst.Source != inst.Base && inst.Section != "dosym"
-		op := resolveInstallOp(inst.Section, isRename)
-
-		dieMsg := "Failed to install " + inst.Source
-		target := ""
-		if inst.Section == "dosym" {
-			target = inst.Target
-		} else if isRename {
-			target = inst.Base
+		parts := make([]string, 0, len(installs))
+		for _, install := range installs {
+			parts = append(parts, install.Source+":"+install.Target)
 		}
-
-		condBody = append(condBody, actionStmt{
-			Op:            op,
-			Source:        inst.Source,
-			Target:        target,
-			Die:           dieMsg,
-			RequiredState: StateRequirement{Family: inst.StateFamily, Value: inst.Dir},
-		})
-
-		if len(inst.Keywords) > 0 || len(inst.Use) > 0 {
-			stmts = append(stmts, conditionStmt{
-				Expr: newArchsAndUseExpr(inst.Keywords, inst.Use),
-				Body: condBody,
-			})
-		} else {
-			stmts = append(stmts, condBody...)
+		key := strings.Join(parts, ";")
+		if byKey[key] == nil {
+			byKey[key] = &automaticInstallGroup{installs: installs}
 		}
+		byKey[key].architectures = append(byKey[key].architectures, architecture)
 	}
+	keys := make([]string, 0, len(byKey))
+	for key := range byKey {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	result := make([]automaticInstallGroup, 0, len(keys))
+	for _, key := range keys {
+		slices.Sort(byKey[key].architectures)
+		result = append(result, *byKey[key])
+	}
+	return result
+}
 
-	for _, man := range doman {
-		stmts = append(stmts, actionStmt{
-			Op:            OpDoman,
-			Source:        man,
-			RequiredState: StateRequirement{Family: StateFamilyNone},
-		})
+func automaticInstallStatement(install installData, bindir string) actionStmt {
+	rename := install.Source != install.Target && !strings.HasSuffix(install.Source, "/"+install.Target)
+	if !rename {
+		return actionStmt{Op: OpDoexe, Source: install.Source, Die: "Failed to install binary", RequiredState: StateRequirement{Family: StateFamilyExe, Value: bindir}}
 	}
-	for _, doc := range dodoc {
-		stmts = append(stmts, actionStmt{
-			Op:            OpDodoc,
-			Source:        doc,
-			RequiredState: StateRequirement{Family: StateFamilyDoc, Value: ""},
-		})
+	return actionStmt{Op: OpNewexe, Source: install.Source, Target: install.Target, Die: "Failed to install " + install.Target, RequiredState: StateRequirement{Family: StateFamilyExe, Value: bindir}}
+}
+
+func (b *installProgramBuilder) addExplicitInstalls() {
+	for _, install := range b.explicit {
+		body := explicitInstallStatements(install)
+		if len(install.Keywords) == 0 && len(install.Use) == 0 {
+			b.statements = append(b.statements, body...)
+			continue
+		}
+		b.statements = append(b.statements, conditionStmt{Expr: newArchsAndUseExpr(install.Keywords, install.Use), Body: body})
 	}
-	return &InstallProgram{UniverseArchitectures: keywordsList, Body: stmts}
+}
+
+func explicitInstallStatements(install installItemData) []installStmt {
+	var body []installStmt
+	if install.StateFamily != StateFamilyNone && install.Dir != "" {
+		body = append(body, stateStmt{Family: install.StateFamily, Value: install.Dir})
+	}
+	rename := install.Source != install.Base && install.Section != "dosym"
+	target := ""
+	if install.Section == "dosym" {
+		target = install.Target
+	} else if rename {
+		target = install.Base
+	}
+	return append(body, actionStmt{
+		Op: resolveInstallOp(install.Section, rename), Source: install.Source, Target: target,
+		Die:           "Failed to install " + install.Source,
+		RequiredState: StateRequirement{Family: install.StateFamily, Value: install.Dir},
+	})
+}
+
+func (b *installProgramBuilder) addManpages() {
+	for _, manpage := range b.manpages {
+		b.statements = append(b.statements, actionStmt{Op: OpDoman, Source: manpage, RequiredState: StateRequirement{Family: StateFamilyNone}})
+	}
+}
+
+func (b *installProgramBuilder) addDocs() {
+	for _, doc := range b.docs {
+		b.statements = append(b.statements, actionStmt{Op: OpDodoc, Source: doc, RequiredState: StateRequirement{Family: StateFamilyDoc}})
+	}
 }

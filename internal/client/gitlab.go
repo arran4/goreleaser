@@ -108,7 +108,7 @@ func (c *gitlabClient) ListDir(ctx *context.Context, repo Repo, dir string) ([]s
 			return nil, err
 		}
 		for _, item := range tree {
-			if item != nil && item.Type == "blob" {
+			if item != nil && (item.Type == "blob" || item.Type == "tree") {
 				names = append(names, item.Name)
 			}
 		}

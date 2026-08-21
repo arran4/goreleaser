@@ -18,7 +18,8 @@ import (
 // is decoded during construction so downstream planning never depends on its
 // weakly typed map representation.
 type Archive struct {
-	artifact   *artifact.Artifact
+	name       string
+	sourcePath string
 	id         string
 	goarch     string
 	gentooArch string
@@ -30,6 +31,8 @@ type Archive struct {
 }
 
 func (a *Archive) ID() string         { return a.id }
+func (a *Archive) Name() string       { return a.name }
+func (a *Archive) SourcePath() string { return a.sourcePath }
 func (a *Archive) GoArch() string     { return a.goarch }
 func (a *Archive) GentooArch() string { return a.gentooArch }
 func (a *Archive) URI() string        { return a.uri }
@@ -61,15 +64,7 @@ type Release struct {
 }
 
 func NewRelease(ctx *context.Context, cfg *GentooConfig, cl client.ReleaseURLTemplater) (*Release, error) {
-	filters := []artifact.Filter{
-		artifact.ByGoos("linux"),
-		artifact.ByType(artifact.UploadableArchive),
-		artifact.OnlyReplacingUnibins,
-	}
-	if ids := cfg.ArchiveIDs(); len(ids) > 0 {
-		filters = append(filters, artifact.ByIDs(ids...))
-	}
-	selected := ctx.Artifacts.Filter(artifact.And(filters...)).List()
+	selected := selectReleaseArtifacts(ctx, cfg)
 	if len(selected) == 0 {
 		return nil, errors.New("no linux archives found")
 	}
@@ -87,7 +82,7 @@ func NewRelease(ctx *context.Context, cfg *GentooConfig, cl client.ReleaseURLTem
 		}
 		key := archive.ID() + "\x00" + archive.GentooArch()
 		if previous := seen[key]; previous != nil {
-			return nil, fmt.Errorf("multiple linux archives map to Gentoo architecture %q for ID %q (%s and %s); please filter artifacts", archive.GentooArch(), archive.ID(), previous.artifact.Name, art.Name)
+			return nil, fmt.Errorf("multiple linux archives map to Gentoo architecture %q for ID %q (%s and %s); please filter artifacts", archive.GentooArch(), archive.ID(), previous.Name(), archive.Name())
 		}
 		seen[key] = archive
 		release.archives = append(release.archives, archive)
@@ -102,6 +97,36 @@ func NewRelease(ctx *context.Context, cfg *GentooConfig, cl client.ReleaseURLTem
 		return strings.Compare(a.Distfile(), b.Distfile())
 	})
 	return release, nil
+}
+
+func selectReleaseArtifacts(ctx *context.Context, cfg *GentooConfig) []*artifact.Artifact {
+	filters := []artifact.Filter{
+		artifact.ByGoos("linux"),
+		artifact.ByType(artifact.UploadableArchive),
+		artifact.OnlyReplacingUnibins,
+	}
+	if ids := cfg.ArchiveIDs(); len(ids) > 0 {
+		filters = append(filters, artifact.ByIDs(ids...))
+	}
+	return ctx.Artifacts.Filter(artifact.And(filters...)).List()
+}
+
+// DistfileSource is the normalized local input used to hash a DIST record.
+type DistfileSource struct {
+	Name string
+	Path string
+}
+
+// ReleaseDistfiles applies the same archive boundary used by generation but
+// retains only the normalized values needed to hash publication DIST records.
+func ReleaseDistfiles(ctx *context.Context, cfg *GentooConfig) []DistfileSource {
+	selected := selectReleaseArtifacts(ctx, cfg)
+	result := make([]DistfileSource, 0, len(selected))
+	for _, archive := range selected {
+		result = append(result, DistfileSource{Name: archiveDistfile(cfg, ctx.Version, archive.Name), Path: archive.Path})
+	}
+	slices.SortFunc(result, func(a, b DistfileSource) int { return strings.Compare(a.Name, b.Name) })
+	return result
 }
 
 func newArchive(ctx *context.Context, cfg *GentooConfig, art *artifact.Artifact, uriTemplate string) (*Archive, error) {
@@ -119,7 +144,8 @@ func newArchive(ctx *context.Context, cfg *GentooConfig, art *artifact.Artifact,
 		binaries = []string{cfg.Name()}
 	}
 	return &Archive{
-		artifact:   art,
+		name:       art.Name,
+		sourcePath: art.Path,
 		id:         artifact.ExtraOr(*art, artifact.ExtraID, "default"),
 		goarch:     art.Goarch,
 		gentooArch: gentooArchitecture,

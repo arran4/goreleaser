@@ -51,7 +51,7 @@ func (f GeneratedFile) Artifact() *artifact.Artifact {
 }
 
 func GeneratedFileFromArtifact(art artifact.Artifact) (GeneratedFile, error) {
-	ref, ok := art.Extra[ebuildExtra].(GentooArtifactRef)
+	ref, ok := decodeGentooArtifactRef(art.Extra[ebuildExtra])
 	if !ok || ref.ConfigID == "" || ref.RepoPath == "" {
 		return GeneratedFile{}, fmt.Errorf("gentoo artifact %q has no safe configuration reference", art.Name)
 	}
@@ -62,6 +62,20 @@ func GeneratedFileFromArtifact(art artifact.Artifact) (GeneratedFile, error) {
 		kind = GeneratedMetaCache
 	}
 	return GeneratedFile{ConfigID: ref.ConfigID, RepoPath: ref.RepoPath, Kind: kind, Path: art.Path}, nil
+}
+
+func decodeGentooArtifactRef(value any) (GentooArtifactRef, bool) {
+	if ref, ok := value.(GentooArtifactRef); ok {
+		return ref, true
+	}
+	fields, ok := value.(map[string]any)
+	if !ok {
+		return GentooArtifactRef{}, false
+	}
+	configID, configOK := fields["ConfigID"].(string)
+	repoPath, pathOK := fields["RepoPath"].(string)
+	metaCache, _ := fields["MetaCache"].(bool)
+	return GentooArtifactRef{ConfigID: configID, RepoPath: repoPath, MetaCache: metaCache}, configOK && pathOK
 }
 
 func (f GeneratedFile) Content() ([]byte, error) { return os.ReadFile(f.Path) }

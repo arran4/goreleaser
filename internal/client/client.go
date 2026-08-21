@@ -101,7 +101,8 @@ type FileDownloader interface {
 	DownloadFile(ctx *context.Context, repo Repo, path string) ([]byte, error)
 }
 
-// DirectoryLister can list directory contents.
+// DirectoryLister lists immediate file and directory names. Callers that need
+// a tree can distinguish entries by attempting a file read before recursing.
 type DirectoryLister interface {
 	ListDir(ctx *context.Context, repo Repo, dir string) ([]string, error)
 }

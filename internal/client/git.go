@@ -43,9 +43,7 @@ func (g *gitClient) ListDir(ctx *context.Context, repo Repo, dir string) ([]stri
 	}
 	var names []string
 	for _, e := range entries {
-		if e.Type().IsRegular() {
-			names = append(names, e.Name())
-		}
+		names = append(names, e.Name())
 	}
 	return names, nil
 }

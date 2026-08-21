@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/caarlos0/log"
@@ -26,7 +27,13 @@ func NewExtraFiles(cfg *GentooConfig, release *Release, files map[string]string)
 }
 
 func (f *ExtraFiles) Prepare() error {
-	for name, source := range f.files {
+	names := make([]string, 0, len(f.files))
+	for name := range f.files {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		source := f.files[name]
 		if f.inEveryArchive(name) {
 			log.Warnf("file %s is already in all archives, skipping upload to Gentoo files/ directory", name)
 			delete(f.files, name)
@@ -104,7 +111,13 @@ func (f *ExtraFiles) ResolveAll(names []string) []string {
 
 func (f *ExtraFiles) Write(ebuildPath string) ([]GeneratedFile, error) {
 	var generated []GeneratedFile
-	for name, source := range f.files {
+	names := make([]string, 0, len(f.files))
+	for name := range f.files {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		source := f.files[name]
 		relativePath, err := gentooExtraFilePath(name)
 		if err != nil {
 			return nil, err
