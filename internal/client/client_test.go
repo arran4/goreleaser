@@ -279,6 +279,20 @@ func TestFillDeprecated(t *testing.T) {
 	})
 }
 
+func TestDirectoryListerContentKinds(t *testing.T) {
+	for kind, expected := range map[string]bool{
+		"file":      true,
+		"dir":       true,
+		"symlink":   false,
+		"submodule": false,
+		"":          false,
+	} {
+		t.Run(kind, func(t *testing.T) {
+			require.Equal(t, expected, isFileOrDirectory(kind))
+		})
+	}
+}
+
 func TestRepoString(t *testing.T) {
 	t.Parallel()
 	t.Run("with owner and name", func(t *testing.T) {

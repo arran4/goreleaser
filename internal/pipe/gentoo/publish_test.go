@@ -8,7 +8,9 @@ import (
 
 	"github.com/goreleaser/goreleaser/v2/internal/artifact"
 	"github.com/goreleaser/goreleaser/v2/internal/client"
+	"github.com/goreleaser/goreleaser/v2/internal/git"
 	"github.com/goreleaser/goreleaser/v2/internal/testctx"
+	"github.com/goreleaser/goreleaser/v2/internal/testlib"
 	"github.com/goreleaser/goreleaser/v2/pkg/config"
 	"github.com/goreleaser/goreleaser/v2/pkg/context"
 	"github.com/stretchr/testify/require"
@@ -181,6 +183,45 @@ func TestPublisherPrepareThickManifestFailsWithoutCompletePackageState(t *testin
 	require.ErrorContains(t, err, "cannot construct thick Manifest from retained package files")
 }
 
+func TestPublisherPrepareGitRepositoryReadsRemoteStateOnFirstUse(t *testing.T) {
+	remote, privateKey := gentooGitStateRepository(t, map[string][]byte{
+		"metadata/layout.conf":                  []byte("thin-manifests = true\nmanifest-hashes = SHA256\n"),
+		"app-misc/foo-bin/foo-bin-1.0.ebuild":   []byte("EAPI=8\n# retained\n"),
+		"app-misc/foo-bin/Manifest":             []byte("DIST foo-1.0.tar.gz 3 SHA256 old\n"),
+		"app-misc/foo-bin/files/retained.patch": []byte("patch\n"),
+	})
+	directory := t.TempDir()
+	ebuildPath := filepath.Join(directory, "foo-bin-2.0.ebuild")
+	archivePath := filepath.Join(directory, "foo-2.0.tar.gz")
+	require.NoError(t, os.WriteFile(ebuildPath, []byte("EAPI=8\n"), 0o644))
+	require.NoError(t, os.WriteFile(archivePath, []byte("archive"), 0o644))
+
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{Dist: t.TempDir()}, testctx.WithVersion("2.0"))
+	ctx.Artifacts.Add(&artifact.Artifact{Name: "foo-2.0.tar.gz", Path: archivePath, Goos: "linux", Goarch: "amd64", Type: artifact.UploadableArchive})
+	cfg := &GentooConfig{raw: config.Gentoo{
+		ID: "default", Name: "foo", Category: "app-misc", Type: "bin",
+		ConflictResolution: config.ConflictResolutionOverwrite,
+		KeepVersions:       1, VersionRetentionStrategy: config.VersionRetentionStrategyKeepLatest,
+		CommitAuthor: config.CommitAuthor{Name: "Test", Email: "test@example.com"}, CommitMessageTemplate: "publish",
+		Repository: config.RepoRef{Name: "overlay", Branch: "main", Git: config.GitRepoRef{URL: remote, PrivateKey: privateKey}},
+	}, version: "2.0"}
+	checkout := filepath.Join(ctx.Config.Dist, "git", "overlay-main")
+	require.NoDirExists(t, checkout)
+	publisher, err := NewPublisher(ctx, cfg, []GeneratedFile{{ConfigID: cfg.ID(), RepoPath: cfg.EbuildPath(), Kind: GeneratedEbuild, Path: ebuildPath}}, client.NewMock())
+	require.NoError(t, err)
+
+	changes, err := publisher.Prepare(ctx)
+	require.NoError(t, err)
+	require.DirExists(t, checkout)
+	deleted, ok := changes.Find("app-misc/foo-bin/foo-bin-1.0.ebuild")
+	require.True(t, ok, "the existing remote ebuild must participate in retention")
+	require.True(t, deleted.Delete)
+	manifest, ok := changes.Find(cfg.ManifestPath())
+	require.True(t, ok)
+	require.NotContains(t, string(manifest.Content), "foo-1.0.tar.gz", "the existing remote Manifest must participate in planning")
+	require.Contains(t, string(manifest.Content), "foo-2.0.tar.gz")
+}
+
 func TestCollectPublicationInputsInterleavedArtifacts(t *testing.T) {
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{Gentoos: []config.Gentoo{
 		{ID: "a", Name: "alpha", Category: "app-misc"},
@@ -219,4 +260,31 @@ func generatedRepoPaths(files []GeneratedFile) []string {
 		result = append(result, file.RepoPath)
 	}
 	return result
+}
+
+func gentooGitStateRepository(t *testing.T, files map[string][]byte) (string, string) {
+	t.Helper()
+	remote := testlib.GitMakeBareRepository(t)
+	seed := t.TempDir()
+	for name, content := range files {
+		filename := filepath.Join(seed, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(filename), 0o755))
+		require.NoError(t, os.WriteFile(filename, content, 0o644))
+	}
+	run := func(directory string, args ...string) {
+		t.Helper()
+		command := append([]string{"-C", directory}, args...)
+		_, err := git.Clean(git.Run(t.Context(), command...))
+		require.NoError(t, err)
+	}
+	run(seed, "init", "-b", "main")
+	run(seed, "config", "user.name", "Test")
+	run(seed, "config", "user.email", "test@example.com")
+	run(seed, "config", "commit.gpgSign", "false")
+	run(seed, "add", "-A", ".")
+	run(seed, "commit", "-m", "seed")
+	run(seed, "remote", "add", "origin", remote)
+	run(seed, "push", "origin", "main")
+	run(remote, "symbolic-ref", "HEAD", "refs/heads/main")
+	return remote, testlib.MakeNewSSHKey(t, "")
 }

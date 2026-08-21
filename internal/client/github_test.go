@@ -162,6 +162,27 @@ func TestGitHubUploadReleaseIDNotInt(t *testing.T) {
 	)
 }
 
+func TestGitHubListDirFiltersUnsupportedContentKinds(t *testing.T) {
+	t.Parallel()
+	srv := githubTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v3/repos/owner/overlay/contents/pkg", r.URL.Path)
+		require.Equal(t, "main", r.URL.Query().Get("ref"))
+		fmt.Fprint(w, `[
+			{"name":"Manifest","type":"file"},
+			{"name":"files","type":"dir"},
+			{"name":"linked","type":"symlink"},
+			{"name":"vendor","type":"submodule"}
+		]`)
+	})
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{GitHubURLs: config.GitHubURLs{API: srv.URL}})
+	client, err := newGitHub(ctx, "test-token")
+	require.NoError(t, err)
+
+	names, err := client.ListDir(ctx, Repo{Owner: "owner", Name: "overlay", Branch: "main"}, "pkg")
+	require.NoError(t, err)
+	require.Equal(t, []string{"Manifest", "files"}, names)
+}
+
 func TestGitHubReleaseURLTemplate(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

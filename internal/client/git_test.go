@@ -9,6 +9,7 @@ import (
 	"github.com/goreleaser/goreleaser/v2/internal/testctx"
 	"github.com/goreleaser/goreleaser/v2/internal/testlib"
 	"github.com/goreleaser/goreleaser/v2/pkg/config"
+	"github.com/goreleaser/goreleaser/v2/pkg/context"
 	"github.com/stretchr/testify/require"
 )
 
@@ -265,17 +266,68 @@ func TestGitClient(t *testing.T) {
 	})
 }
 
-func TestGitClientListDirIncludesDirectories(t *testing.T) {
-	dist := t.TempDir()
-	ctx := testctx.WrapWithCfg(t.Context(), config.Project{Dist: dist})
-	directory := filepath.Join(dist, "git", "overlay-main", "app-misc", "foo-bin")
-	require.NoError(t, os.MkdirAll(filepath.Join(directory, "files"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(directory, "foo-bin-1.0.ebuild"), []byte("EAPI=8\n"), 0o644))
+func TestGitClientReadsPrepareAndReuseCheckout(t *testing.T) {
+	ctx, repo := gitReadRepository(t)
+	checkout := filepath.Join(ctx.Config.Dist, "git", "overlay-main")
+	require.NoDirExists(t, checkout)
 
-	client := &gitClient{branch: "main"}
-	names, err := client.ListDir(ctx, Repo{Name: "overlay"}, "app-misc/foo-bin")
+	reader := NewGitUploadClient("main")
+	names, err := reader.ListDir(ctx, repo, "app-misc/foo-bin")
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"files", "foo-bin-1.0.ebuild"}, names)
+	require.DirExists(t, checkout)
+
+	content, err := reader.DownloadFile(ctx, repo, "metadata/layout.conf")
+	require.NoError(t, err)
+	require.Equal(t, "thin-manifests = true\n", string(content))
+	nested, err := reader.ListDir(ctx, repo, "app-misc/foo-bin/files")
+	require.NoError(t, err)
+	require.Equal(t, []string{"foo.patch"}, nested)
+	patch, err := reader.DownloadFile(ctx, repo, "app-misc/foo-bin/files/foo.patch")
+	require.NoError(t, err)
+	require.Equal(t, "patch\n", string(patch))
+
+	marker := filepath.Join(checkout, ".checkout-reused")
+	require.NoError(t, os.WriteFile(marker, []byte("marker"), 0o644))
+	_, err = reader.ListDir(ctx, repo, "app-misc/foo-bin")
+	require.NoError(t, err)
+	require.FileExists(t, marker, "a repeated read must not replace the checkout")
+
+	writer := NewGitUploadClient("main")
+	require.NoError(t, writer.CreateFile(ctx, config.CommitAuthor{Name: "Test", Email: "test@example.com"}, repo, []byte("new\n"), "new.txt", "write after read"))
+	require.Equal(t, "new\n", string(testlib.CatFileFromBareRepositoryOnBranch(t, repo.GitURL, "main", "new.txt")))
+}
+
+func TestGitClientReadDoesNotCreateMissingBranch(t *testing.T) {
+	ctx, repo := gitReadRepository(t)
+	reader := NewGitUploadClient("does-not-exist")
+	_, err := reader.ListDir(ctx, repo, "app-misc/foo-bin")
+	require.ErrorContains(t, err, "could not checkout existing branch does-not-exist for reading")
+	require.Error(t, runGitCmds(ctx, repo.GitURL, nil, [][]string{{"show-ref", "--verify", "refs/heads/does-not-exist"}}))
+}
+
+func gitReadRepository(t *testing.T) (*context.Context, Repo) {
+	t.Helper()
+	remote := testlib.GitMakeBareRepository(t)
+	seed := t.TempDir()
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{Dist: t.TempDir()})
+	require.NoError(t, os.MkdirAll(filepath.Join(seed, "metadata"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(seed, "app-misc", "foo-bin", "files"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(seed, "metadata", "layout.conf"), []byte("thin-manifests = true\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(seed, "app-misc", "foo-bin", "foo-bin-1.0.ebuild"), []byte("EAPI=8\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(seed, "app-misc", "foo-bin", "files", "foo.patch"), []byte("patch\n"), 0o644))
+	require.NoError(t, runGitCmds(ctx, seed, nil, [][]string{
+		{"init", "-b", "main"},
+		{"config", "user.name", "Test"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "commit.gpgSign", "false"},
+		{"add", "-A", "."},
+		{"commit", "-m", "seed"},
+		{"remote", "add", "origin", remote},
+		{"push", "origin", "main"},
+	}))
+	require.NoError(t, runGitCmds(ctx, remote, nil, [][]string{{"symbolic-ref", "HEAD", "refs/heads/main"}}))
+	return ctx, Repo{Name: "overlay", Branch: "main", GitURL: remote, PrivateKey: testlib.MakeNewSSHKey(t, "")}
 }
 
 func TestKeyPath(t *testing.T) {

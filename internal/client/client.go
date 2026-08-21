@@ -107,6 +107,10 @@ type DirectoryLister interface {
 	ListDir(ctx *context.Context, repo Repo, dir string) ([]string, error)
 }
 
+func isFileOrDirectory(kind string) bool {
+	return kind == "file" || kind == "dir"
+}
+
 // FileDeleter removes files from a repository.
 type FileDeleter interface {
 	DeleteFile(ctx *context.Context, commitAuthor config.CommitAuthor, repo Repo, path, message string) error

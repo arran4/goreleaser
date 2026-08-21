@@ -42,7 +42,7 @@ func (g *Generator) Generate() error {
 	if err != nil {
 		return err
 	}
-	ebuild := g.newEbuild(release, plan, extraInstall)
+	ebuild := g.newEbuild(release, plan)
 	content, err := ebuild.Render()
 	if err != nil {
 		return err
@@ -78,7 +78,7 @@ func (g *Generator) resolveExtraInstall() (string, error) {
 	}).Apply(g.cfg.ExtraInstall())
 }
 
-func (g *Generator) newEbuild(release *Release, plan *InstallProgram, extraInstall string) Ebuild {
+func (g *Generator) newEbuild(release *Release, plan *InstallProgram) Ebuild {
 	keywords := []string(g.cfg.Keywords())
 	if len(keywords) == 0 {
 		keywords = release.Keywords()
@@ -91,8 +91,8 @@ func (g *Generator) newEbuild(release *Release, plan *InstallProgram, extraInsta
 	}
 	return Ebuild{
 		Name: g.cfg.Name(), Description: g.cfg.Description(), Homepage: g.cfg.Homepage(), License: g.cfg.License(),
-		Keywords: strings.Join(keywords, " "), Bindir: g.cfg.Bindir(), ExtraInstall: extraInstall,
-		Archs: release.templateArchitectures(), UseFlags: g.cfg.UseFlags(), Eclasses: eclasses, Plan: plan,
+		Keywords: strings.Join(keywords, " "),
+		Archs:    release.templateArchitectures(), UseFlags: g.cfg.UseFlags(), Eclasses: eclasses, Plan: plan,
 	}
 }
 

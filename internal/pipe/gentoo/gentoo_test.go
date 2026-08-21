@@ -842,7 +842,6 @@ func TestTemplateScenarios(t *testing.T) {
 			data := Ebuild{
 				Description: "test scenario ebuild",
 				License:     "MIT",
-				Bindir:      "/usr/bin",
 				UseFlags:    gentooUseFlags(config.Gentoo{}),
 				Plan:        reducedPlan,
 			}

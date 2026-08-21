@@ -40,3 +40,26 @@ func TestOpDescriptorRejectsIncompatibleFixedDestination(t *testing.T) {
 	_, _, _, err := OpDoinitd.Descriptor().DecomposeDestination("foo.init", "/tmp/foo", "")
 	require.ErrorContains(t, err, "expected /etc/init.d/<name>")
 }
+
+func TestInstallOpDescriptorTableIsCompleteAndConsistent(t *testing.T) {
+	known := map[InstallOp]struct{}{}
+	for _, op := range allInstallOps {
+		_, duplicate := known[op]
+		require.False(t, duplicate, "allInstallOps contains %q more than once", op)
+		known[op] = struct{}{}
+
+		descriptor, ok := installOpDescriptors[op]
+		require.True(t, ok, "%q has no descriptor", op)
+		require.Equal(t, op, descriptor.Op)
+		require.Equal(t, descriptor.ArgMode == ArgModeRename, descriptor.IsRename, "%q has inconsistent rename markers", op)
+		if !descriptor.SupportsRename {
+			continue
+		}
+		_, renameKnown := installOpDescriptors[descriptor.RenameOp]
+		require.True(t, renameKnown, "%q references unknown rename operation %q", op, descriptor.RenameOp)
+		rename := descriptor.RenameOp.Descriptor()
+		require.True(t, rename.IsRename)
+		require.Equal(t, ArgModeRename, rename.ArgMode)
+	}
+	require.Len(t, installOpDescriptors, len(allInstallOps), "descriptor table and allInstallOps must describe the same operation set")
+}

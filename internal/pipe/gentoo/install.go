@@ -1,6 +1,7 @@
 package gentoo
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -41,6 +42,32 @@ type installSection struct {
 	name       string
 	items      []config.GentooInstallItem
 	defaultDir string
+}
+
+type installItemData struct {
+	Source      string
+	Target      string
+	Dir         string
+	Base        string
+	Use         []string
+	Keywords    []string
+	Section     string
+	StateFamily StateFamily
+}
+
+func (d installItemData) Validate() error {
+	if d.Section == "" {
+		return errors.New("section is required")
+	}
+	if d.Source == "" {
+		return errors.New("source is required")
+	}
+	isRename := d.Source != d.Base && d.Section != "dosym"
+	descriptor := resolveInstallOp(d.Section, isRename).Descriptor()
+	if descriptor.ArgMode == ArgModeRename && d.Base == "" {
+		return fmt.Errorf("%s requires a destination base name", resolveInstallOp(d.Section, isRename))
+	}
+	return nil
 }
 
 // InstallPlanner lowers resolved config and normalized archives into the

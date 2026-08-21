@@ -30,10 +30,22 @@ type gitClient struct {
 	branch string
 }
 
+type gitWorkspace struct {
+	cwd  string
+	env  []string
+	url  string
+	name string
+}
+
 func (g *gitClient) ListDir(ctx *context.Context, repo Repo, dir string) ([]string, error) {
-	parent := filepath.Join(ctx.Config.Dist, "git")
-	name := repo.Name + "-" + g.branch
-	cwd := filepath.Join(parent, name, dir)
+	gil.Lock()
+	defer gil.Unlock()
+
+	workspace, err := g.ensureReadCheckout(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	cwd := filepath.Join(workspace.cwd, dir)
 	entries, err := os.ReadDir(cwd)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -77,88 +89,11 @@ func (g *gitClient) CreateFiles(
 	gil.Lock()
 	defer gil.Unlock()
 
-	url, err := tmpl.New(ctx).Apply(repo.GitURL)
-	if err != nil {
-		return fmt.Errorf("git: failed to template git url: %w", err)
-	}
-
-	if url == "" {
-		return pipe.Skip("url is empty")
-	}
-
-	repo.Name = cmp.Or(repo.Name, nameFromURL(url))
-
-	key, err := tmpl.New(ctx).Apply(repo.PrivateKey)
-	if err != nil {
-		return fmt.Errorf("git: failed to template private key: %w", err)
-	}
-
-	key, err = keyPath(key)
+	workspace, err := g.ensureWriteCheckout(ctx, repo, commitAuthor)
 	if err != nil {
 		return err
 	}
-
-	sshcmd, err := tmpl.New(ctx).WithExtraFields(tmpl.Fields{
-		"KeyPath": key,
-	}).Apply(cmp.Or(repo.GitSSHCommand, DefaultGitSSHCommand))
-	if err != nil {
-		return fmt.Errorf("git: failed to template ssh command: %w", err)
-	}
-
-	parent := filepath.Join(ctx.Config.Dist, "git")
-	name := repo.Name + "-" + g.branch
-	cwd := filepath.Join(parent, name)
-	env := []string{fmt.Sprintf("GIT_SSH_COMMAND=%s", sshcmd)}
-
-	if _, err := os.Stat(cwd); errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(parent, 0o755); err != nil {
-			return fmt.Errorf("git: failed to create parent: %w", err)
-		}
-
-		if err := cloneRepo(ctx, parent, url, name, env); err != nil {
-			return err
-		}
-
-		gitCmds := [][]string{
-			{"config", "--local", "user.name", commitAuthor.Name},
-			{"config", "--local", "user.email", commitAuthor.Email},
-			{"config", "--local", "init.defaultBranch", cmp.Or(g.branch, "master")},
-		}
-
-		// append git flags for signing to overall comand if configured
-		if commitAuthor.Signing.Enabled {
-			gitCmds = append(gitCmds, []string{"config", "--local", "commit.gpgSign", "true"})
-
-			if commitAuthor.Signing.Key != "" {
-				gitCmds = append(gitCmds, []string{"config", "--local", "user.signingKey", commitAuthor.Signing.Key})
-			}
-
-			if commitAuthor.Signing.Program != "" {
-				gitCmds = append(gitCmds, []string{"config", "--local", "gpg.program", commitAuthor.Signing.Program})
-			}
-
-			if commitAuthor.Signing.Format != "" && commitAuthor.Signing.Format != "openpgp" {
-				gitCmds = append(gitCmds, []string{"config", "--local", "gpg.format", commitAuthor.Signing.Format})
-			}
-		} else {
-			gitCmds = append(gitCmds, []string{"config", "--local", "commit.gpgSign", "false"})
-		}
-
-		if err := runGitCmds(ctx, cwd, env, gitCmds); err != nil {
-			return fmt.Errorf("git: failed to setup local repository: %w", err)
-		}
-		if g.branch != "" {
-			if err := runGitCmds(ctx, cwd, env, [][]string{
-				{"checkout", g.branch},
-			}); err != nil {
-				if err := runGitCmds(ctx, cwd, env, [][]string{
-					{"checkout", "-b", g.branch},
-				}); err != nil {
-					return fmt.Errorf("git: could not checkout branch %s: %w", g.branch, err)
-				}
-			}
-		}
-	}
+	cwd, env := workspace.cwd, workspace.env
 
 	for _, file := range files {
 		location := filepath.Join(cwd, file.Path)
@@ -178,8 +113,8 @@ func (g *gitClient) CreateFiles(
 			return fmt.Errorf("failed to write %s: %w", file.Path, err)
 		}
 		log.
-			WithField("repository", url).
-			WithField("name", repo.Name).
+			WithField("repository", workspace.url).
+			WithField("name", workspace.name).
 			WithField("file", file.Path).
 			Info("pushing")
 	}
@@ -187,7 +122,7 @@ func (g *gitClient) CreateFiles(
 	if err := runGitCmds(ctx, cwd, env, [][]string{
 		{"add", "-A", "."},
 	}); err != nil {
-		return fmt.Errorf("git: failed to add files to commit %q (%q): %w", repo.Name, url, err)
+		return fmt.Errorf("git: failed to add files to commit %q (%q): %w", workspace.name, workspace.url, err)
 	}
 
 	if err := runGitCmds(ctx, cwd, env, [][]string{
@@ -196,18 +131,133 @@ func (g *gitClient) CreateFiles(
 		if err := runGitCmds(ctx, cwd, env, [][]string{
 			{"commit", "-m", message},
 		}); err != nil {
-			return fmt.Errorf("git: failed to commit %q (%q): %w", repo.Name, url, err)
+			return fmt.Errorf("git: failed to commit %q (%q): %w", workspace.name, workspace.url, err)
 		}
 		if err := pushRepo(ctx, cwd, env); err != nil {
-			return fmt.Errorf("git: failed to push %q (%q): %w", repo.Name, url, err)
+			return fmt.Errorf("git: failed to push %q (%q): %w", workspace.name, workspace.url, err)
 		}
 	} else {
 		log.
-			WithField("repository", url).
-			WithField("name", repo.Name).
+			WithField("repository", workspace.url).
+			WithField("name", workspace.name).
 			Info("no changes to commit")
 	}
 
+	return nil
+}
+
+func (g *gitClient) workspace(ctx *context.Context, repo Repo) (gitWorkspace, error) {
+	url, err := tmpl.New(ctx).Apply(repo.GitURL)
+	if err != nil {
+		return gitWorkspace{}, fmt.Errorf("git: failed to template git url: %w", err)
+	}
+
+	if url == "" {
+		return gitWorkspace{}, pipe.Skip("url is empty")
+	}
+
+	repo.Name = cmp.Or(repo.Name, nameFromURL(url))
+
+	key, err := tmpl.New(ctx).Apply(repo.PrivateKey)
+	if err != nil {
+		return gitWorkspace{}, fmt.Errorf("git: failed to template private key: %w", err)
+	}
+
+	key, err = keyPath(key)
+	if err != nil {
+		return gitWorkspace{}, err
+	}
+
+	sshcmd, err := tmpl.New(ctx).WithExtraFields(tmpl.Fields{
+		"KeyPath": key,
+	}).Apply(cmp.Or(repo.GitSSHCommand, DefaultGitSSHCommand))
+	if err != nil {
+		return gitWorkspace{}, fmt.Errorf("git: failed to template ssh command: %w", err)
+	}
+
+	parent := filepath.Join(ctx.Config.Dist, "git")
+	name := repo.Name + "-" + g.branch
+	cwd := filepath.Join(parent, name)
+	env := []string{fmt.Sprintf("GIT_SSH_COMMAND=%s", sshcmd)}
+
+	_, statErr := os.Stat(cwd)
+	if statErr == nil {
+		return gitWorkspace{cwd: cwd, env: env, url: url, name: repo.Name}, nil
+	}
+	if !errors.Is(statErr, os.ErrNotExist) {
+		return gitWorkspace{}, fmt.Errorf("git: failed to inspect local repository: %w", statErr)
+	}
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return gitWorkspace{}, fmt.Errorf("git: failed to create parent: %w", err)
+	}
+	if err := cloneRepo(ctx, parent, url, name, env); err != nil {
+		return gitWorkspace{}, err
+	}
+	return gitWorkspace{cwd: cwd, env: env, url: url, name: repo.Name}, nil
+}
+
+func (g *gitClient) ensureReadCheckout(ctx *context.Context, repo Repo) (gitWorkspace, error) {
+	workspace, err := g.workspace(ctx, repo)
+	if err != nil {
+		return gitWorkspace{}, err
+	}
+	if g.branch == "" {
+		return workspace, nil
+	}
+	if err := runGitCmds(ctx, workspace.cwd, workspace.env, [][]string{{"checkout", g.branch}}); err != nil {
+		return gitWorkspace{}, fmt.Errorf("git: could not checkout existing branch %s for reading: %w", g.branch, err)
+	}
+	return workspace, nil
+}
+
+func (g *gitClient) ensureWriteCheckout(ctx *context.Context, repo Repo, commitAuthor config.CommitAuthor) (gitWorkspace, error) {
+	workspace, err := g.workspace(ctx, repo)
+	if err != nil {
+		return gitWorkspace{}, err
+	}
+	if err := configureGitWorkspace(ctx, workspace, commitAuthor, cmp.Or(g.branch, "master")); err != nil {
+		return gitWorkspace{}, err
+	}
+	if g.branch == "" {
+		return workspace, nil
+	}
+	if err := runGitCmds(ctx, workspace.cwd, workspace.env, [][]string{{"checkout", g.branch}}); err == nil {
+		return workspace, nil
+	}
+	if err := runGitCmds(ctx, workspace.cwd, workspace.env, [][]string{{"checkout", "-b", g.branch}}); err != nil {
+		return gitWorkspace{}, fmt.Errorf("git: could not checkout branch %s: %w", g.branch, err)
+	}
+	return workspace, nil
+}
+
+func configureGitWorkspace(ctx *context.Context, workspace gitWorkspace, commitAuthor config.CommitAuthor, defaultBranch string) error {
+	gitCmds := [][]string{
+		{"config", "--local", "user.name", commitAuthor.Name},
+		{"config", "--local", "user.email", commitAuthor.Email},
+		{"config", "--local", "init.defaultBranch", defaultBranch},
+	}
+
+	if commitAuthor.Signing.Enabled {
+		gitCmds = append(gitCmds, []string{"config", "--local", "commit.gpgSign", "true"})
+
+		if commitAuthor.Signing.Key != "" {
+			gitCmds = append(gitCmds, []string{"config", "--local", "user.signingKey", commitAuthor.Signing.Key})
+		}
+
+		if commitAuthor.Signing.Program != "" {
+			gitCmds = append(gitCmds, []string{"config", "--local", "gpg.program", commitAuthor.Signing.Program})
+		}
+
+		if commitAuthor.Signing.Format != "" && commitAuthor.Signing.Format != "openpgp" {
+			gitCmds = append(gitCmds, []string{"config", "--local", "gpg.format", commitAuthor.Signing.Format})
+		}
+	} else {
+		gitCmds = append(gitCmds, []string{"config", "--local", "commit.gpgSign", "false"})
+	}
+
+	if err := runGitCmds(ctx, workspace.cwd, workspace.env, gitCmds); err != nil {
+		return fmt.Errorf("git: failed to setup local repository: %w", err)
+	}
 	return nil
 }
 
@@ -321,9 +371,14 @@ func nameFromURL(url string) string {
 }
 
 func (g *gitClient) DownloadFile(ctx *context.Context, repo Repo, path string) ([]byte, error) {
-	parent := filepath.Join(ctx.Config.Dist, "git")
-	name := repo.Name + "-" + g.branch
-	cwd := filepath.Join(parent, name, path)
+	gil.Lock()
+	defer gil.Unlock()
+
+	workspace, err := g.ensureReadCheckout(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	cwd := filepath.Join(workspace.cwd, path)
 	content, err := os.ReadFile(cwd)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

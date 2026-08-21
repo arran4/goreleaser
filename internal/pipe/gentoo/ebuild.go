@@ -30,48 +30,19 @@ type archData struct {
 	URIs    []archItem
 }
 
-type installItemData struct {
-	Source      string
-	Target      string
-	Dir         string
-	Base        string
-	Use         []string
-	Keywords    []string
-	Section     string
-	StateFamily StateFamily
-}
-
-func (d installItemData) Validate() error {
-	if d.Section == "" {
-		return errors.New("section is required")
-	}
-	if d.Source == "" {
-		return errors.New("source is required")
-	}
-	isRename := d.Source != d.Base && d.Section != "dosym"
-	desc := resolveInstallOp(d.Section, isRename).Descriptor()
-	if desc.ArgMode == ArgModeRename && d.Base == "" {
-		return fmt.Errorf("%s requires a destination base name", resolveInstallOp(d.Section, isRename))
-	}
-	return nil
-}
-
 // Ebuild is a rendered package definition built from a normalized Release and
 // an already reduced install program. It never performs archive selection or
 // config install-item resolution.
 type Ebuild struct {
-	Name         string
-	Description  string
-	Homepage     string
-	License      string
-	Keywords     string
-	Bindir       string
-	ExtraInstall string
-	Archs        []archData
-	UseFlags     []config.GentooUseFlag
-	Systemd      []installItemData
-	Eclasses     []string
-	Plan         *InstallProgram
+	Name        string
+	Description string
+	Homepage    string
+	License     string
+	Keywords    string
+	Archs       []archData
+	UseFlags    []config.GentooUseFlag
+	Eclasses    []string
+	Plan        *InstallProgram
 }
 
 func (e Ebuild) Validate() error {
