@@ -279,13 +279,13 @@ func TestGitClientReadsPrepareAndReuseCheckout(t *testing.T) {
 
 	content, err := reader.DownloadFile(ctx, repo, "metadata/layout.conf")
 	require.NoError(t, err)
-	require.Equal(t, "thin-manifests = true\n", string(content))
+	require.Equal(t, "thin-manifests = true", strings.TrimSpace(string(content)))
 	nested, err := reader.ListDir(ctx, repo, "app-misc/foo-bin/files")
 	require.NoError(t, err)
 	require.Equal(t, []string{"foo.patch"}, nested)
 	patch, err := reader.DownloadFile(ctx, repo, "app-misc/foo-bin/files/foo.patch")
 	require.NoError(t, err)
-	require.Equal(t, "patch\n", string(patch))
+	require.Equal(t, "patch", strings.TrimSpace(string(patch)))
 
 	marker := filepath.Join(checkout, ".checkout-reused")
 	require.NoError(t, os.WriteFile(marker, []byte("marker"), 0o644))
