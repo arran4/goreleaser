@@ -1421,6 +1421,12 @@ func (p *installPlan) String(indent string) string {
 }
 
 func (p *installPlan) reducePlan() *installPlan {
+	return p.Reduce()
+}
+
+// Reduce simplifies an install program to a fixed point while preserving its
+// state requirements and architecture/USE conditions.
+func (p *installPlan) Reduce() *installPlan {
 	if p == nil {
 		return nil
 	}

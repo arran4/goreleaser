@@ -186,21 +186,23 @@ func generateMetaCacheContent(data ebuildData, ebuildContent string) string {
 	return meta
 }
 
-type extraFilesProcessor struct {
+// ExtraFiles owns the auxiliary files that are copied to an ebuild's files/
+// directory. Install lowering intentionally belongs to InstallPlanner.
+type ExtraFiles struct {
 	cfg        config.Gentoo
 	arches     []*artifact.Artifact
 	extraFiles map[string]string
 }
 
-func newExtraFilesProcessor(cfg config.Gentoo, arches []*artifact.Artifact, extraFiles map[string]string) *extraFilesProcessor {
-	return &extraFilesProcessor{
+func newExtraFilesProcessor(cfg config.Gentoo, arches []*artifact.Artifact, extraFiles map[string]string) *ExtraFiles {
+	return &ExtraFiles{
 		cfg:        cfg,
 		arches:     arches,
 		extraFiles: extraFiles,
 	}
 }
 
-func (v *extraFilesProcessor) inArchives(fileName string) bool {
+func (v *ExtraFiles) inArchives(fileName string) bool {
 	if len(v.arches) == 0 {
 		return false
 	}
@@ -239,7 +241,7 @@ func normalizeArchivePath(pathStr string) string {
 	return strings.TrimPrefix(filepath.ToSlash(filepath.Clean(pathStr)), "./")
 }
 
-func (v *extraFilesProcessor) Filter() error {
+func (v *ExtraFiles) Filter() error {
 	for name, src := range v.extraFiles {
 		if v.inArchives(name) {
 			log.Warnf("file %s is already in all archives, skipping upload to Gentoo files/ directory", name)
@@ -253,7 +255,7 @@ func (v *extraFilesProcessor) Filter() error {
 	return nil
 }
 
-func (v *extraFilesProcessor) validate(name, src string) error {
+func (v *ExtraFiles) validate(name, src string) error {
 	info, err := os.Stat(src)
 	if err != nil {
 		return fmt.Errorf("failed to stat extra file %s: %w", name, err)
@@ -324,7 +326,7 @@ func lowerInstallItemsFromConfig(sectionName string, cfgItems []config.GentooIns
 	return items, nil
 }
 
-func (v *extraFilesProcessor) decomposeItemDestination(sectionName, src, dst, defaultDir string) (string, StateFamily, string, string, error) {
+func (v *ExtraFiles) decomposeItemDestination(sectionName, src, dst, defaultDir string) (string, StateFamily, string, string, error) {
 	if sectionName == "systemd" {
 		hasSystemdEclass := slices.Contains(v.cfg.Eclasses, "systemd")
 		if dst == "" {
@@ -349,7 +351,7 @@ func (v *extraFilesProcessor) decomposeItemDestination(sectionName, src, dst, de
 	return sectionName, family, dir, base, err
 }
 
-func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []config.GentooInstallItem, defaultDir string) ([]installItemData, error) {
+func (v *ExtraFiles) buildInstallItems(sectionName string, cfgItems []config.GentooInstallItem, defaultDir string) ([]installItemData, error) {
 	var items []installItemData
 	for _, d := range cfgItems {
 		if d.Src == "" && d.SrcID == "" {
@@ -493,7 +495,7 @@ func (v *extraFilesProcessor) buildInstallItems(sectionName string, cfgItems []c
 	return items, nil
 }
 
-func (v *extraFilesProcessor) processStringArray(arr []string) []string {
+func (v *ExtraFiles) processStringArray(arr []string) []string {
 	var out []string
 	for _, s := range arr {
 		if _, ok := v.extraFiles[s]; ok {
@@ -505,7 +507,7 @@ func (v *extraFilesProcessor) processStringArray(arr []string) []string {
 	return out
 }
 
-func (v *extraFilesProcessor) InstallExtraFiles(ctx *context.Context, ebuildPath string) error {
+func (v *ExtraFiles) InstallExtraFiles(ctx *context.Context, ebuildPath string) error {
 	for name, src := range v.extraFiles {
 		destName, err := gentooExtraFilePath(name)
 		if err != nil {
@@ -519,13 +521,10 @@ func (v *extraFilesProcessor) InstallExtraFiles(ctx *context.Context, ebuildPath
 			return err
 		}
 		ctx.Artifacts.Add(&artifact.Artifact{
-			Name: destName,
-			Path: dst,
-			Type: artifact.GentooFile,
-			Extra: map[string]any{
-				ebuildExtra:     v.cfg,
-				ebuildPathExtra: path.Join(packageDir(v.cfg), filepath.ToSlash(destName)),
-			},
+			Name:  destName,
+			Path:  dst,
+			Type:  artifact.GentooFile,
+			Extra: gentooArtifactExtra(v.cfg.ID, path.Join(packageDir(v.cfg), filepath.ToSlash(destName)), false),
 		})
 	}
 	return nil

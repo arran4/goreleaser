@@ -3,7 +3,6 @@ package gentoo
 
 import (
 	"bytes"
-	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -23,7 +22,7 @@ import (
 )
 
 const (
-	ebuildExtra     = "GentooConfig"
+	ebuildExtra     = "GentooArtifactRef"
 	ebuildPathExtra = "GentooPath"
 	ebuildMetaCache = "GentooMetaCache"
 )
@@ -108,6 +107,17 @@ func (Pipe) Run(ctx *context.Context) error {
 }
 
 func runAll(ctx *context.Context, cl client.ReleaseURLTemplater) error {
+	destinations := map[string]string{}
+	for _, cfg := range ctx.Config.Gentoos {
+		resolved, err := NewGentooConfig(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		if previous, ok := destinations[resolved.DestinationKey()]; ok {
+			return fmt.Errorf("gentoo configs %q and %q publish to the same package destination", previous, resolved.ID())
+		}
+		destinations[resolved.DestinationKey()] = resolved.ID()
+	}
 	for _, cfg := range ctx.Config.Gentoos {
 		if err := doRun(ctx, cfg, cl); err != nil {
 			return err
@@ -117,25 +127,18 @@ func runAll(ctx *context.Context, cl client.ReleaseURLTemplater) error {
 }
 
 func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplater) error {
-	gentooVer, err := convertToGentooVersion(ctx.Version, cmp.Or(cfg.VersionRepresentation, "gentoo-version"))
+	resolved, err := NewGentooConfig(ctx, cfg)
 	if err != nil {
 		return err
 	}
-
+	cfg = resolved.Raw()
+	gentooVer := resolved.Version()
 	tp := tmpl.New(ctx).WithExtraFields(tmpl.Fields{
 		"GentooVersion": gentooVer,
 		"Version":       gentooVer,
 		"Name":          cfg.Name,
 		"Category":      cfg.Category,
 	})
-	if err := tp.ApplyAll(&cfg.Name, &cfg.Category, &cfg.OverlayPath, &cfg.Description, &cfg.Homepage, &cfg.BugsTo, &cfg.License); err != nil {
-		return err
-	}
-
-	cfg.Repository, err = client.TemplateRef(tp.Apply, cfg.Repository)
-	if err != nil {
-		return err
-	}
 
 	relPath := ebuildRelPath(cfg, gentooVer)
 	if strings.HasPrefix(filepath.ToSlash(filepath.Clean(relPath)), "../") || strings.Contains(filepath.ToSlash(filepath.Clean(relPath)), "/../") {
@@ -385,13 +388,10 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 	}
 
 	ctx.Artifacts.Add(&artifact.Artifact{
-		Name: filepath.Base(path),
-		Path: path,
-		Type: artifact.GentooEbuild,
-		Extra: map[string]any{
-			ebuildExtra:     cfg,
-			ebuildPathExtra: relPath,
-		},
+		Name:  filepath.Base(path),
+		Path:  path,
+		Type:  artifact.GentooEbuild,
+		Extra: gentooArtifactExtra(resolved.ID(), relPath, false),
 	})
 
 	if cfg.MetaCache {
@@ -414,14 +414,10 @@ func doRun(ctx *context.Context, cfg config.Gentoo, cl client.ReleaseURLTemplate
 					return err
 				}
 				ctx.Artifacts.Add(&artifact.Artifact{
-					Name: pkgVer,
-					Path: metaCacheDistPath,
-					Type: artifact.GentooFile,
-					Extra: map[string]any{
-						ebuildExtra:     cfg,
-						ebuildPathExtra: metaCachePath,
-						ebuildMetaCache: true,
-					},
+					Name:  pkgVer,
+					Path:  metaCacheDistPath,
+					Type:  artifact.GentooFile,
+					Extra: gentooArtifactExtra(resolved.ID(), metaCachePath, true),
 				})
 			}
 		}
@@ -445,7 +441,14 @@ func collectPublishGroups(ctx *context.Context) ([]*publishGroup, error) {
 	var groups []*publishGroup
 
 	for _, art := range arts {
-		cfg := artifact.MustExtra[config.Gentoo](*art, ebuildExtra)
+		ref, err := gentooArtifactRef(*art)
+		if err != nil {
+			return nil, err
+		}
+		cfg, err := gentooConfigByID(ctx, ref.ConfigID)
+		if err != nil {
+			return nil, err
+		}
 		skip, err := tmpl.New(ctx).Apply(cfg.SkipUpload)
 		if err != nil {
 			return nil, err
@@ -458,6 +461,11 @@ func collectPublishGroups(ctx *context.Context) ([]*publishGroup, error) {
 			log.Debug("gentoo.skip_upload is auto and version is a prerelease")
 			continue
 		}
+		resolved, err := NewGentooConfig(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+		cfg = resolved.Raw()
 		key := cfg.ID
 		g := groupMap[key]
 		if g == nil {
@@ -471,17 +479,42 @@ func collectPublishGroups(ctx *context.Context) ([]*publishGroup, error) {
 		}
 		g.files = append(g.files, client.RepoFile{
 			Content: content,
-			Path:    filepath.ToSlash(artifact.MustExtra[string](*art, ebuildPathExtra)),
+			Path:    ref.RepoPath,
 		})
 	}
 	return groups, nil
+}
+
+func gentooArtifactExtra(configID, repoPath string, metaCache bool) map[string]any {
+	return map[string]any{
+		ebuildExtra:     GentooArtifactRef{ConfigID: configID, RepoPath: repoPath, MetaCache: metaCache},
+		ebuildPathExtra: repoPath, // kept for artifact compatibility; it contains no configuration.
+		ebuildMetaCache: metaCache,
+	}
+}
+
+func gentooArtifactRef(art artifact.Artifact) (GentooArtifactRef, error) {
+	ref, ok := art.Extra[ebuildExtra].(GentooArtifactRef)
+	if !ok || ref.ConfigID == "" || ref.RepoPath == "" {
+		return GentooArtifactRef{}, fmt.Errorf("gentoo artifact %q has no safe configuration reference", art.Name)
+	}
+	return ref, nil
+}
+
+func gentooConfigByID(ctx *context.Context, id string) (config.Gentoo, error) {
+	for _, cfg := range ctx.Config.Gentoos {
+		if cfg.ID == id {
+			return cfg, nil
+		}
+	}
+	return config.Gentoo{}, fmt.Errorf("gentoo artifact references unknown config ID %q", id)
 }
 
 func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient any, repo client.Repo) ([]string, error) {
 	dir := packageDir(g.cfg)
 	stateRepo := repo
 	if g.cfg.Repository.PullRequest.Enabled {
-		stateRepo.Branch = g.cfg.Repository.PullRequest.Base.Branch
+		stateRepo = pullRequestBaseRepo(repo, g.cfg.Repository.PullRequest.Base)
 	}
 
 	var ebuilds []string
@@ -687,6 +720,19 @@ func (g *publishGroup) applyVersionRetention(ctx *context.Context, repoClient an
 		}
 	}
 	return deletedEbuilds, nil
+}
+
+func pullRequestBaseRepo(target client.Repo, base config.PullRequestBase) client.Repo {
+	if base.Owner != "" {
+		target.Owner = base.Owner
+	}
+	if base.Name != "" {
+		target.Name = base.Name
+	}
+	if base.Branch != "" {
+		target.Branch = base.Branch
+	}
+	return target
 }
 
 func (g *publishGroup) publish(ctx *context.Context, cl client.Client) error {

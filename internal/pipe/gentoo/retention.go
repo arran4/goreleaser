@@ -44,7 +44,9 @@ type gentooSuffix struct {
 	val  int
 }
 
-type parsedGentooVersion struct {
+// GentooVersion is the parsed Gentoo version value used for ordering,
+// retention buckets, and revision planning.
+type GentooVersion struct {
 	raw        string
 	baseNum    []int
 	baseNumStr []string
@@ -53,7 +55,11 @@ type parsedGentooVersion struct {
 	revision   int
 }
 
-func (v *parsedGentooVersion) Compare(other *parsedGentooVersion) int {
+// parsedGentooVersion remains an internal compatibility name while callers
+// migrate to the domain value object.
+type parsedGentooVersion = GentooVersion
+
+func (v *GentooVersion) Compare(other *GentooVersion) int {
 	if v == nil && other == nil {
 		return 0
 	}
@@ -129,11 +135,11 @@ func (v *parsedGentooVersion) Compare(other *parsedGentooVersion) int {
 	return 0
 }
 
-func (v *parsedGentooVersion) GreaterThan(other *parsedGentooVersion) bool {
+func (v *GentooVersion) GreaterThan(other *GentooVersion) bool {
 	return v.Compare(other) > 0
 }
 
-func (v *parsedGentooVersion) baseEqual(other *parsedGentooVersion) bool {
+func (v *GentooVersion) baseEqual(other *GentooVersion) bool {
 	if v == nil || other == nil {
 		return v == other
 	}
@@ -202,7 +208,31 @@ func compareGentooSuffixes(s1, s2 []gentooSuffix) int {
 
 var gentooSuffixTokenRe = regexp.MustCompile(`_(alpha|beta|pre|rc|p)(\d*)$`)
 
-func parseGentooVersion(n, prefix string) *parsedGentooVersion {
+// ParseGentooVersion parses a standalone Gentoo version. It rejects values
+// that cannot be represented by the ebuild version grammar.
+func ParseGentooVersion(version string) (*GentooVersion, error) {
+	v := parseGentooVersion(version+".ebuild", "")
+	if v == nil {
+		return nil, fmt.Errorf("invalid Gentoo version %q", version)
+	}
+	return v, nil
+}
+
+func (v *GentooVersion) String() string {
+	if v == nil {
+		return ""
+	}
+	return strings.TrimSuffix(v.raw, ".ebuild")
+}
+
+func (v *GentooVersion) Revision() int {
+	if v == nil {
+		return 0
+	}
+	return v.revision
+}
+
+func parseGentooVersion(n, prefix string) *GentooVersion {
 	vStr := strings.TrimSuffix(strings.TrimPrefix(n, prefix), ".ebuild")
 	if vStr == "" || vStr == n {
 		return nil
@@ -283,7 +313,7 @@ func parseGentooVersion(n, prefix string) *parsedGentooVersion {
 		baseNumStr = append(baseNumStr, p)
 	}
 
-	return &parsedGentooVersion{
+	return &GentooVersion{
 		raw:        n,
 		baseNum:    baseNum,
 		baseNumStr: baseNumStr,

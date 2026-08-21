@@ -1,6 +1,7 @@
 package gentoo
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,45 @@ import (
 	import_context "github.com/goreleaser/goreleaser/v2/pkg/context"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGeneratedArtifactExtraDoesNotContainRepositoryCredentials(t *testing.T) {
+	dist := t.TempDir()
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+		Dist:        dist,
+		ProjectName: "foo",
+		Gentoos: []config.Gentoo{{
+			Bin:         true,
+			License:     "MIT",
+			Repository:  config.RepoRef{Token: "repository-token", Git: config.GitRepoRef{PrivateKey: "private-key"}},
+			Description: "foo",
+		}},
+	}, testctx.WithVersion("1.0.0"))
+	ctx.Artifacts.Add(&artifact.Artifact{
+		Name: "foo_1.0.0_linux_amd64.tar.gz", Path: "foo.tar.gz", Goos: "linux", Goarch: "amd64", Type: artifact.UploadableArchive,
+	})
+	require.NoError(t, Pipe{}.Default(ctx))
+	require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+
+	generated := ctx.Artifacts.Filter(artifact.ByType(artifact.GentooEbuild)).List()
+	require.Len(t, generated, 1)
+	metadata, err := json.Marshal(generated[0].Extra)
+	require.NoError(t, err)
+	require.NotContains(t, string(metadata), "repository-token")
+	require.NotContains(t, string(metadata), "private-key")
+	require.Equal(t, "default", generated[0].Extra[ebuildExtra].(GentooArtifactRef).ConfigID)
+}
+
+func TestRunAllRejectsDuplicateResolvedPackageDestination(t *testing.T) {
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+		ProjectName: "foo",
+		Gentoos: []config.Gentoo{
+			{ID: "one", Bin: true, License: "MIT", Repository: config.RepoRef{Owner: "owner", Name: "overlay"}},
+			{ID: "two", Bin: true, License: "MIT", Repository: config.RepoRef{Owner: "owner", Name: "overlay"}},
+		},
+	}, testctx.WithVersion("1.0.0"))
+	require.NoError(t, Pipe{}.Default(ctx))
+	require.EqualError(t, runAll(ctx, client.NewMock()), `gentoo configs "one" and "two" publish to the same package destination`)
+}
 
 func TestDoRunMultiArch(t *testing.T) {
 	dist := t.TempDir()
@@ -1435,13 +1475,10 @@ func TestSkipUpload(t *testing.T) {
 			},
 		})
 		ctx.Artifacts.Add(&artifact.Artifact{
-			Name: "foo.ebuild",
-			Path: "dist/foo.ebuild",
-			Type: artifact.GentooEbuild,
-			Extra: map[string]any{
-				ebuildExtra:     ctx.Config.Gentoos[0],
-				ebuildPathExtra: "app-misc/foo/foo-1.0.0.ebuild",
-			},
+			Name:  "foo.ebuild",
+			Path:  "dist/foo.ebuild",
+			Type:  artifact.GentooEbuild,
+			Extra: gentooArtifactExtra("default", "app-misc/foo/foo-1.0.0.ebuild", false),
 		})
 		err := Pipe{}.Publish(ctx)
 		require.NoError(t, err)
@@ -1458,13 +1495,10 @@ func TestSkipUpload(t *testing.T) {
 		})
 		ctx.Semver = import_context.Semver{Prerelease: "beta.1"}
 		ctx.Artifacts.Add(&artifact.Artifact{
-			Name: "foo.ebuild",
-			Path: "dist/foo.ebuild",
-			Type: artifact.GentooEbuild,
-			Extra: map[string]any{
-				ebuildExtra:     ctx.Config.Gentoos[0],
-				ebuildPathExtra: "app-misc/foo/foo-1.0.0.ebuild",
-			},
+			Name:  "foo.ebuild",
+			Path:  "dist/foo.ebuild",
+			Type:  artifact.GentooEbuild,
+			Extra: gentooArtifactExtra("default", "app-misc/foo/foo-1.0.0.ebuild", false),
 		})
 		err := Pipe{}.Publish(ctx)
 		require.NoError(t, err)
