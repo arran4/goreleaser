@@ -141,7 +141,7 @@ func (c *githubClient) ListDir(ctx *context.Context, repo Repo, dir string) ([]s
 	}
 	var names []string
 	for _, item := range contents {
-		if item != nil && item.GetType() == "file" {
+		if item != nil && isFileOrDirectory(item.GetType()) {
 			names = append(names, item.GetName())
 		}
 	}

@@ -1,384 +1,344 @@
 package gentoo
 
 import (
+	"bytes"
 	"fmt"
 	"path"
-	"regexp"
+	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/goreleaser/goreleaser/v2/internal/client"
+	"github.com/goreleaser/goreleaser/v2/pkg/config"
 )
 
-var gentooPrereleaseRe = regexp.MustCompile(`(?i)-(alpha|beta|pre|rc|p)[.\-]?(\d*)`)
+// ExistingEbuild is normalized package state. ContentAvailable distinguishes
+// an unreadable file from a valid empty ebuild; revision comparison requires
+// exact content while name-only conflict and retention policies do not.
+type ExistingEbuild struct {
+	Name             string
+	Path             string
+	Version          *GentooVersion
+	Content          []byte
+	ContentAvailable bool
+}
 
-func convertToGentooVersion(v string, from string) (string, error) {
-	switch from {
-	case "gentoo-version":
-		converted := gentooPrereleaseRe.ReplaceAllStringFunc(v, func(m string) string {
-			match := gentooPrereleaseRe.FindStringSubmatch(m)
-			return "_" + strings.ToLower(match[1]) + match[2]
-		})
-		if parseGentooVersion(converted+".ebuild", "") == nil {
-			return "", fmt.Errorf("version %q cannot be naturally represented in Gentoo", v)
-		}
-		return converted, nil
-	default:
-		return "", fmt.Errorf("unsupported version representation %v", from)
+// RetentionState is the repository-independent input to RetentionPlanner.
+// RepositoryState resolves the exact bytes needed for conflict and cache
+// comparison before constructing this value.
+type RetentionState struct {
+	Ebuilds        []ExistingEbuild
+	Files          map[string][]byte
+	MetaCacheFiles map[string][]byte
+}
+
+// RetentionPlan contains the complete repository-independent result of
+// revision and retention planning. Deletes names existing ebuilds removed by
+// policy; Changes contains both revised writes and corresponding deletions.
+type RetentionPlan struct {
+	Changes         *ChangeSet
+	Deletes         []string
+	RetainedEbuilds []string
+}
+
+// RetentionPlanner ranks existing and incoming Gentoo versions together.
+// Incoming releases never consume an artificial reserved slot, so backfilling
+// an older version cannot evict a newer version already in the overlay.
+type RetentionPlanner struct {
+	cfg      *GentooConfig
+	policy   retentionPolicy
+	state    RetentionState
+	incoming *ChangeSet
+	prefix   string
+}
+
+func NewRetentionPlanner(cfg *GentooConfig, state RetentionState, incoming *ChangeSet) *RetentionPlanner {
+	return &RetentionPlanner{
+		cfg: cfg, policy: cfg.retention(), state: state, incoming: incoming.Clone(), prefix: cfg.PackageName() + "-",
 	}
 }
 
-type suffixKind int
-
-const (
-	suffixAlpha suffixKind = 1
-	suffixBeta  suffixKind = 2
-	suffixPre   suffixKind = 3
-	suffixRc    suffixKind = 4
-	suffixP     suffixKind = 5
-)
-
-type gentooSuffix struct {
-	kind suffixKind
-	val  int
+func (p *RetentionPlanner) Plan() (RetentionPlan, error) {
+	changes := p.incoming.Clone()
+	if err := p.resolveConflicts(changes); err != nil {
+		return RetentionPlan{}, err
+	}
+	incoming := p.incomingEbuildNames(changes)
+	deletes := p.planRetention(incoming)
+	for _, name := range deletes {
+		p.deleteExisting(changes, name)
+	}
+	return RetentionPlan{
+		Changes: changes, Deletes: deletes, RetainedEbuilds: p.retainedEbuilds(incoming, deletes),
+	}, nil
 }
 
-type parsedGentooVersion struct {
-	raw        string
-	baseNum    []int
-	baseNumStr []string
-	baseLetter rune
-	suffixes   []gentooSuffix
-	revision   int
-}
-
-func (v *parsedGentooVersion) Compare(other *parsedGentooVersion) int {
-	if v == nil && other == nil {
-		return 0
-	}
-	if v == nil {
-		return -1
-	}
-	if other == nil {
-		return 1
-	}
-
-	// Algorithm 3.2 & 3.3: Numeric components comparison
-	if len(v.baseNum) > 0 && len(other.baseNum) > 0 {
-		if v.baseNum[0] < other.baseNum[0] {
-			return -1
+func (p *RetentionPlanner) resolveConflicts(changes *ChangeSet) error {
+	for _, file := range changes.Files() {
+		if file.Delete || !p.isEbuild(file.Path) {
+			continue
 		}
-		if v.baseNum[0] > other.baseNum[0] {
-			return 1
-		}
-	}
-
-	minLen := min(len(v.baseNum), len(other.baseNum))
-	for i := 1; i < minLen; i++ {
-		s1 := v.baseNumStr[i]
-		s2 := other.baseNumStr[i]
-		if strings.HasPrefix(s1, "0") || strings.HasPrefix(s2, "0") {
-			s1Trim := strings.TrimRight(s1, "0")
-			s2Trim := strings.TrimRight(s2, "0")
-			if s1Trim < s2Trim {
-				return -1
+		switch p.policy.conflictResolution {
+		case config.ConflictResolutionFail:
+			if p.existingByName(filepath.Base(file.Path)) != nil {
+				return fmt.Errorf("ebuild %s already exists in %s", filepath.Base(file.Path), p.cfg.PackageDir())
 			}
-			if s1Trim > s2Trim {
-				return 1
+		case config.ConflictResolutionRevision:
+			if err := p.resolveRevision(changes, file); err != nil {
+				return err
 			}
-		} else {
-			if v.baseNum[i] < other.baseNum[i] {
-				return -1
-			}
-			if v.baseNum[i] > other.baseNum[i] {
-				return 1
-			}
+		case config.ConflictResolutionOverwrite, "":
+			continue
 		}
 	}
-
-	if len(v.baseNum) < len(other.baseNum) {
-		return -1
-	}
-	if len(v.baseNum) > len(other.baseNum) {
-		return 1
-	}
-
-	// Algorithm 3.4: Letter components comparison
-	if v.baseLetter < other.baseLetter {
-		return -1
-	}
-	if v.baseLetter > other.baseLetter {
-		return 1
-	}
-
-	// Algorithm 3.5 & 3.6: Suffixes comparison
-	cmpSuffix := compareGentooSuffixes(v.suffixes, other.suffixes)
-	if cmpSuffix != 0 {
-		return cmpSuffix
-	}
-
-	// Algorithm 3.7: Revision comparison
-	if v.revision < other.revision {
-		return -1
-	}
-	if v.revision > other.revision {
-		return 1
-	}
-
-	return 0
+	return nil
 }
 
-func (v *parsedGentooVersion) GreaterThan(other *parsedGentooVersion) bool {
-	return v.Compare(other) > 0
+func (p *RetentionPlanner) resolveRevision(changes *ChangeSet, incoming client.RepoFile) error {
+	version := parseGentooVersion(filepath.Base(incoming.Path), p.prefix)
+	if version == nil {
+		return nil
+	}
+	existing := p.latestBaseVersion(version)
+	if existing == nil {
+		return nil
+	}
+	if !existing.ContentAvailable {
+		return fmt.Errorf("cannot compare existing ebuild %s for revision planning: content is unavailable", existing.Path)
+	}
+	if p.contentMatches(*existing, incoming, changes) {
+		p.renameRevision(changes, incoming.Path, existing.Version)
+		return nil
+	}
+	p.renameRevision(changes, incoming.Path, version.WithRevision(existing.Version.Revision()+1))
+	return nil
 }
 
-func (v *parsedGentooVersion) baseEqual(other *parsedGentooVersion) bool {
-	if v == nil || other == nil {
-		return v == other
-	}
-	if len(v.baseNum) != len(other.baseNum) || v.baseLetter != other.baseLetter || len(v.suffixes) != len(other.suffixes) {
+func (p *RetentionPlanner) contentMatches(existing ExistingEbuild, incoming client.RepoFile, changes *ChangeSet) bool {
+	if !bytes.Equal(stripComments(existing.Content), stripComments(incoming.Content)) {
 		return false
 	}
-	for i := range v.baseNum {
-		if v.baseNum[i] != other.baseNum[i] || v.baseNumStr[i] != other.baseNumStr[i] {
-			return false
+	for _, file := range changes.Files() {
+		if file.Delete || file.Path == incoming.Path {
+			continue
 		}
-	}
-	for i := range v.suffixes {
-		if v.suffixes[i] != other.suffixes[i] {
+		existingPath := file.Path
+		if file.Path == p.cfg.MetaCachePath() {
+			existingPath = p.cfg.MetaCachePathForVersion(existing.Version.String())
+		}
+		content, ok := p.state.Files[existingPath]
+		if !ok || !bytes.Equal(content, file.Content) {
 			return false
 		}
 	}
 	return true
 }
 
-func compareGentooSuffixes(s1, s2 []gentooSuffix) int {
-	if len(s1) == 0 && len(s2) == 0 {
-		return 0
-	}
-	if len(s1) == 0 {
-		if s2[0].kind == suffixP {
-			return -1 // release < _p
-		}
-		return 1 // release > _alpha, _beta, _pre, _rc
-	}
-	if len(s2) == 0 {
-		if s1[0].kind == suffixP {
-			return 1 // _p > release
-		}
-		return -1 // _alpha, _beta, _pre, _rc < release
-	}
-
-	maxLen := max(len(s1), len(s2))
-	for i := range maxLen {
-		if i >= len(s1) {
-			if s2[i].kind == suffixP {
-				return -1
-			}
-			return 1
-		}
-		if i >= len(s2) {
-			if s1[i].kind == suffixP {
-				return 1
-			}
-			return -1
-		}
-		if s1[i].kind < s2[i].kind {
-			return -1
-		}
-		if s1[i].kind > s2[i].kind {
-			return 1
-		}
-		if s1[i].val < s2[i].val {
-			return -1
-		}
-		if s1[i].val > s2[i].val {
-			return 1
-		}
-	}
-	return 0
-}
-
-var gentooSuffixTokenRe = regexp.MustCompile(`_(alpha|beta|pre|rc|p)(\d*)$`)
-
-func parseGentooVersion(n, prefix string) *parsedGentooVersion {
-	vStr := strings.TrimSuffix(strings.TrimPrefix(n, prefix), ".ebuild")
-	if vStr == "" || vStr == n {
-		return nil
-	}
-
-	var rev int
-	if idx := strings.LastIndex(vStr, "-r"); idx != -1 {
-		if parsedRev, err := strconv.Atoi(vStr[idx+2:]); err == nil {
-			rev = parsedRev
-			vStr = vStr[:idx]
-		}
-	}
-
-	var suffixes []gentooSuffix
-	for {
-		loc := gentooSuffixTokenRe.FindStringSubmatchIndex(vStr)
-		if loc == nil {
-			break
-		}
-		kindStr := vStr[loc[2]:loc[3]]
-		valStr := vStr[loc[4]:loc[5]]
-		val := 0
-		if valStr != "" {
-			var err error
-			val, err = strconv.Atoi(valStr)
-			if err != nil {
-				return nil
-			}
-		}
-
-		var kind suffixKind
-		switch kindStr {
-		case "alpha":
-			kind = suffixAlpha
-		case "beta":
-			kind = suffixBeta
-		case "pre":
-			kind = suffixPre
-		case "rc":
-			kind = suffixRc
-		case "p":
-			kind = suffixP
-		default:
-			return nil
-		}
-
-		suffixes = append([]gentooSuffix{{kind: kind, val: val}}, suffixes...)
-		vStr = vStr[:loc[0]]
-	}
-
-	if vStr == "" {
-		return nil
-	}
-
-	var letter rune
-	lastChar := vStr[len(vStr)-1]
-	if lastChar >= 'a' && lastChar <= 'z' {
-		letter = rune(lastChar)
-		vStr = vStr[:len(vStr)-1]
-	}
-
-	if vStr == "" {
-		return nil
-	}
-
-	parts := strings.Split(vStr, ".")
-	var baseNum []int
-	var baseNumStr []string
-	for _, p := range parts {
-		if p == "" {
-			return nil
-		}
-		num, err := strconv.Atoi(p)
-		if err != nil {
-			return nil
-		}
-		baseNum = append(baseNum, num)
-		baseNumStr = append(baseNumStr, p)
-	}
-
-	return &parsedGentooVersion{
-		raw:        n,
-		baseNum:    baseNum,
-		baseNumStr: baseNumStr,
-		baseLetter: letter,
-		suffixes:   suffixes,
-		revision:   rev,
-	}
-}
-
-func getVersionBucket(v *parsedGentooVersion) string {
-	if v == nil || len(v.suffixes) == 0 {
-		return "stable"
-	}
-	last := v.suffixes[len(v.suffixes)-1]
-	switch last.kind {
-	case suffixAlpha:
-		return "alpha"
-	case suffixBeta:
-		return "beta"
-	case suffixPre:
-		return "pre"
-	case suffixRc:
-		return "rc"
-	default:
-		return "stable"
-	}
-}
-
-type ebuildDeleter struct {
-	dir            string
-	metaCacheDir   string
-	metaCacheFiles map[string]struct{}
-	files          *[]client.RepoFile
-	deletedEbuilds *[]string
-}
-
-func (d *ebuildDeleter) Delete(ebuildName string) {
-	*d.files = append(*d.files, client.RepoFile{Path: path.Join(d.dir, ebuildName), Delete: true})
-	*d.deletedEbuilds = append(*d.deletedEbuilds, ebuildName)
-	md5Name := strings.TrimSuffix(ebuildName, ".ebuild")
-	if _, ok := d.metaCacheFiles[md5Name]; !ok {
+func (p *RetentionPlanner) renameRevision(changes *ChangeSet, oldPath string, version *GentooVersion) {
+	file, ok := changes.Find(oldPath)
+	if !ok {
 		return
 	}
-	md5CachePath := path.Join(d.metaCacheDir, md5Name)
-	*d.files = append(*d.files, client.RepoFile{Path: md5CachePath, Delete: true})
+	newPath := path.Join(p.cfg.PackageDir(), p.prefix+version.String()+".ebuild")
+	file.Path = newPath
+	changes.Remove(oldPath)
+	changes.Add(file)
+	cache, ok := changes.Find(p.cfg.MetaCachePath())
+	if !ok {
+		return
+	}
+	changes.Remove(cache.Path)
+	cache.Path = p.cfg.MetaCachePathForVersion(version.String())
+	changes.Add(cache)
 }
 
-func countNewEbuilds(ebuilds, newFiles []string, bucket func(string) string) map[string]int {
-	counts := map[string]int{}
-	for _, file := range newFiles {
-		if !slices.Contains(ebuilds, file) {
-			counts[bucket(file)]++
+func (p *RetentionPlanner) latestBaseVersion(version *GentooVersion) *ExistingEbuild {
+	var latest *ExistingEbuild
+	for i := range p.state.Ebuilds {
+		candidate := &p.state.Ebuilds[i]
+		if !candidate.Version.BaseEqual(version) {
+			continue
+		}
+		if latest == nil || candidate.Version.GreaterThan(latest.Version) {
+			latest = candidate
 		}
 	}
-	return counts
+	return latest
 }
 
-func determineKeepLatestDeletions(ebuilds, newFiles []string, prefix string, keepVersions int) []string {
-	var allEbuilds []string
-	allEbuilds = append(allEbuilds, ebuilds...)
-	for _, n := range newFiles {
-		if !slices.Contains(ebuilds, n) {
-			allEbuilds = append(allEbuilds, n)
+func (p *RetentionPlanner) planRetention(incoming []string) []string {
+	if p.policy.keepVersions <= 0 || p.policy.strategy == "" {
+		return nil
+	}
+	switch p.policy.strategy {
+	case config.VersionRetentionStrategyKeepLatest:
+		return p.keepLatest(incoming)
+	case config.VersionRetentionStrategyKeepPrereleases:
+		return p.keepPrereleases(incoming)
+	default:
+		return nil
+	}
+}
+
+func (p *RetentionPlanner) keepLatest(incoming []string) []string {
+	all := p.combinedNames(incoming)
+	slices.SortFunc(all, p.compareNames)
+	kept := all[:min(len(all), p.policy.keepVersions)]
+	return p.existingNotKept(kept, incoming, nil)
+}
+
+func (p *RetentionPlanner) keepPrereleases(incoming []string) []string {
+	all := p.combinedNames(incoming)
+	maxima := p.bucketMaxima(all)
+	kept := map[string]struct{}{}
+	for _, bucket := range []string{"alpha", "beta", "pre", "rc", "stable"} {
+		var candidates []string
+		for _, name := range all {
+			version := parseGentooVersion(name, p.prefix)
+			if p.versionBucket(version) != bucket || p.supersededByLaterBucket(version, maxima) {
+				continue
+			}
+			candidates = append(candidates, name)
+		}
+		slices.SortFunc(candidates, p.compareNames)
+		for _, name := range candidates[:min(len(candidates), p.policy.keepVersions)] {
+			kept[name] = struct{}{}
 		}
 	}
+	return p.existingNotKept(nil, incoming, kept)
+}
 
-	slices.SortFunc(allEbuilds, func(i, j string) int {
-		vI := parseGentooVersion(i, prefix)
-		vJ := parseGentooVersion(j, prefix)
-		if vI != nil && vJ != nil {
-			if vI.GreaterThan(vJ) {
-				return -1
-			}
-			if vJ.GreaterThan(vI) {
-				return 1
-			}
-			return 0
-		}
-		if vI != nil {
-			return -1
-		}
-		if vJ != nil {
-			return 1
-		}
-		return strings.Compare(j, i)
-	})
-
-	var toDelete []string
-	if len(allEbuilds) > keepVersions {
-		keptFiles := allEbuilds[:keepVersions]
-		for _, n := range ebuilds {
-			if !slices.Contains(keptFiles, n) {
-				toDelete = append(toDelete, n)
-			}
+func (p *RetentionPlanner) existingNotKept(keptNames, incoming []string, keptSet map[string]struct{}) []string {
+	if keptSet == nil {
+		keptSet = map[string]struct{}{}
+		for _, name := range keptNames {
+			keptSet[name] = struct{}{}
 		}
 	}
-	return toDelete
+	var deletes []string
+	for _, existing := range p.state.Ebuilds {
+		if slices.Contains(incoming, existing.Name) {
+			continue
+		}
+		if _, ok := keptSet[existing.Name]; !ok {
+			deletes = append(deletes, existing.Name)
+		}
+	}
+	slices.Sort(deletes)
+	return deletes
+}
+
+func (p *RetentionPlanner) bucketMaxima(names []string) map[string]*GentooVersion {
+	result := map[string]*GentooVersion{}
+	for _, name := range names {
+		version := parseGentooVersion(name, p.prefix)
+		bucket := p.versionBucket(version)
+		if result[bucket] == nil || version.GreaterThan(result[bucket]) {
+			result[bucket] = version
+		}
+	}
+	return result
+}
+
+func (p *RetentionPlanner) supersededByLaterBucket(version *GentooVersion, maxima map[string]*GentooVersion) bool {
+	if version == nil {
+		return false
+	}
+	order := []string{"alpha", "beta", "pre", "rc", "stable"}
+	index := slices.Index(order, version.Bucket())
+	for _, bucket := range order[index+1:] {
+		if maxima[bucket] != nil && maxima[bucket].Compare(version) >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *RetentionPlanner) versionBucket(version *GentooVersion) string {
+	if version == nil {
+		return "stable"
+	}
+	return version.Bucket()
+}
+
+func (p *RetentionPlanner) combinedNames(incoming []string) []string {
+	result := slices.Clone(incoming)
+	for _, existing := range p.state.Ebuilds {
+		if !slices.Contains(result, existing.Name) {
+			result = append(result, existing.Name)
+		}
+	}
+	return result
+}
+
+func (p *RetentionPlanner) incomingEbuildNames(changes *ChangeSet) []string {
+	var result []string
+	for _, file := range changes.Files() {
+		if !file.Delete && p.isEbuild(file.Path) {
+			result = append(result, filepath.Base(file.Path))
+		}
+	}
+	slices.Sort(result)
+	return slices.Compact(result)
+}
+
+func (p *RetentionPlanner) retainedEbuilds(incoming, deletes []string) []string {
+	result := slices.Clone(incoming)
+	for _, existing := range p.state.Ebuilds {
+		if !slices.Contains(deletes, existing.Name) && !slices.Contains(result, existing.Name) {
+			result = append(result, existing.Name)
+		}
+	}
+	slices.SortFunc(result, p.compareNames)
+	return result
+}
+
+func (p *RetentionPlanner) deleteExisting(changes *ChangeSet, name string) {
+	changes.Delete(path.Join(p.cfg.PackageDir(), name))
+	version := strings.TrimSuffix(strings.TrimPrefix(name, p.prefix), ".ebuild")
+	cachePath := p.cfg.MetaCachePathForVersion(version)
+	if _, ok := p.state.MetaCacheFiles[cachePath]; ok {
+		changes.Delete(cachePath)
+	}
+}
+
+func (p *RetentionPlanner) existingByName(name string) *ExistingEbuild {
+	for i := range p.state.Ebuilds {
+		if p.state.Ebuilds[i].Name == name {
+			return &p.state.Ebuilds[i]
+		}
+	}
+	return nil
+}
+
+func (p *RetentionPlanner) isEbuild(filename string) bool {
+	return path.Dir(filepath.ToSlash(filename)) == p.cfg.PackageDir() && strings.HasPrefix(filepath.Base(filename), p.prefix) && strings.HasSuffix(filename, ".ebuild")
+}
+
+func (p *RetentionPlanner) compareNames(left, right string) int {
+	a := parseGentooVersion(left, p.prefix)
+	b := parseGentooVersion(right, p.prefix)
+	if a == nil && b == nil {
+		return strings.Compare(right, left)
+	}
+	if a == nil {
+		return 1
+	}
+	if b == nil {
+		return -1
+	}
+	return -a.Compare(b)
+}
+
+func stripComments(content []byte) []byte {
+	var result []byte
+	for line := range bytes.SplitSeq(content, []byte{'\n'}) {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 || trimmed[0] == '#' {
+			continue
+		}
+		result = append(result, line...)
+		result = append(result, '\n')
+	}
+	return result
 }

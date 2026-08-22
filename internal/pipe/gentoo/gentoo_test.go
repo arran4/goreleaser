@@ -1,7 +1,7 @@
 package gentoo
 
 import (
-	"fmt"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +16,49 @@ import (
 	import_context "github.com/goreleaser/goreleaser/v2/pkg/context"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGeneratedArtifactExtraDoesNotContainRepositoryCredentials(t *testing.T) {
+	dist := t.TempDir()
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+		Dist:        dist,
+		ProjectName: "foo",
+		Gentoos: []config.Gentoo{{
+			Bin:     true,
+			License: "MIT",
+			Repository: config.RepoRef{
+				Token: "repository-token", Git: config.GitRepoRef{PrivateKey: "private-key"},
+				PullRequest: config.PullRequest{Enabled: true, Token: "pull-request-token"},
+			},
+			Description: "foo",
+		}},
+	}, testctx.WithVersion("1.0.0"))
+	ctx.Artifacts.Add(&artifact.Artifact{
+		Name: "foo_1.0.0_linux_amd64.tar.gz", Path: "foo.tar.gz", Goos: "linux", Goarch: "amd64", Type: artifact.UploadableArchive,
+	})
+	require.NoError(t, Pipe{}.Default(ctx))
+	require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
+
+	generated := ctx.Artifacts.Filter(artifact.ByType(artifact.GentooEbuild)).List()
+	require.Len(t, generated, 1)
+	metadata, err := json.Marshal(generated[0].Extra)
+	require.NoError(t, err)
+	require.NotContains(t, string(metadata), "repository-token")
+	require.NotContains(t, string(metadata), "pull-request-token")
+	require.NotContains(t, string(metadata), "private-key")
+	require.Equal(t, "default", generated[0].Extra[ebuildExtra].(GentooArtifactRef).ConfigID)
+}
+
+func TestRunAllRejectsDuplicateResolvedPackageDestination(t *testing.T) {
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
+		ProjectName: "foo",
+		Gentoos: []config.Gentoo{
+			{ID: "one", Bin: true, License: "MIT", Repository: config.RepoRef{Owner: "owner", Name: "overlay"}},
+			{ID: "two", Bin: true, License: "MIT", Repository: config.RepoRef{Owner: "owner", Name: "overlay"}},
+		},
+	}, testctx.WithVersion("1.0.0"))
+	require.NoError(t, Pipe{}.Default(ctx))
+	require.EqualError(t, runAll(ctx, client.NewMock()), `gentoo configs "one" and "two" publish to the same package destination`)
+}
 
 func TestDoRunMultiArch(t *testing.T) {
 	dist := t.TempDir()
@@ -331,7 +374,9 @@ func TestDefaultSetsPath(t *testing.T) {
 	require.Equal(t, "foo", ctx.Config.Gentoos[0].Name)
 	require.Equal(t, "app-misc", ctx.Config.Gentoos[0].Category)
 	require.Empty(t, ctx.Config.Gentoos[0].OverlayPath)
-	require.Equal(t, "app-misc/foo-bin/foo-bin-1.0.0.ebuild", ebuildRelPath(ctx.Config.Gentoos[0], "1.0.0"))
+	resolved, err := NewGentooConfig(ctx, ctx.Config.Gentoos[0])
+	require.NoError(t, err)
+	require.Equal(t, "app-misc/foo-bin/foo-bin-1.0.0.ebuild", resolved.EbuildPath())
 }
 
 func TestDefaultSetsPathWithCategory(t *testing.T) {
@@ -346,7 +391,9 @@ func TestDefaultSetsPathWithCategory(t *testing.T) {
 	require.NoError(t, Pipe{}.Default(ctx))
 	require.Equal(t, "app-admin", ctx.Config.Gentoos[0].Category)
 	require.Empty(t, ctx.Config.Gentoos[0].OverlayPath)
-	require.Equal(t, "app-admin/foo-bin/foo-bin-1.0.0.ebuild", ebuildRelPath(ctx.Config.Gentoos[0], "1.0.0"))
+	resolved, err := NewGentooConfig(ctx, ctx.Config.Gentoos[0])
+	require.NoError(t, err)
+	require.Equal(t, "app-admin/foo-bin/foo-bin-1.0.0.ebuild", resolved.EbuildPath())
 }
 
 func TestDefaultWithOverlayPath(t *testing.T) {
@@ -361,7 +408,9 @@ func TestDefaultWithOverlayPath(t *testing.T) {
 	}, testctx.WithVersion("1.0.0"))
 	require.NoError(t, Pipe{}.Default(ctx))
 	require.Equal(t, "my-prefix", ctx.Config.Gentoos[0].OverlayPath)
-	require.Equal(t, "my-prefix/app-admin/foo-bin/foo-bin-1.0.0.ebuild", ebuildRelPath(ctx.Config.Gentoos[0], "1.0.0"))
+	resolved, err := NewGentooConfig(ctx, ctx.Config.Gentoos[0])
+	require.NoError(t, err)
+	require.Equal(t, "my-prefix/app-admin/foo-bin/foo-bin-1.0.0.ebuild", resolved.EbuildPath())
 }
 
 func TestPathWithCategoryAndNameTemplates(t *testing.T) {
@@ -469,7 +518,7 @@ func TestHandleGentooManifestAndMetadata(t *testing.T) {
 	})
 
 	var files []client.RepoFile
-	err := handleGentooManifestAndMetadata(ctx, cfg, nil, client.Repo{}, &files, []string{"foo-0.9.0.ebuild"})
+	err := handleGentooManifestAndMetadata(ctx, cfg, nil, &files, []string{"foo-bin-0.9.0.ebuild"})
 	require.NoError(t, err)
 	require.Len(t, files, 2)
 
@@ -501,7 +550,7 @@ func TestHandleGentooMetadata(t *testing.T) {
 	}
 
 	var files []client.RepoFile
-	require.NoError(t, handleGentooManifestAndMetadata(ctx, cfg, nil, client.Repo{}, &files, nil))
+	require.NoError(t, handleGentooManifestAndMetadata(ctx, cfg, nil, &files, nil))
 	require.NotEmpty(t, files)
 	golden.RequireEqual(t, files[0].Content)
 }
@@ -526,19 +575,19 @@ func TestHandleGentooManifestThick(t *testing.T) {
 	})
 
 	files := []client.RepoFile{
-		{Content: []byte("ebuild content"), Path: "app-misc/foo/foo-1.0.0.ebuild"},
-		{Content: []byte("patch content"), Path: "app-misc/foo/files/foo.patch"},
-		{Content: []byte("service content"), Path: "app-misc/foo/files/systemd/foo.service"},
-		{Content: []byte("<pkgmetadata></pkgmetadata>"), Path: "app-misc/foo/metadata.xml"},
+		{Content: []byte("ebuild content"), Path: "app-misc/foo-bin/foo-bin-1.0.0.ebuild"},
+		{Content: []byte("patch content"), Path: "app-misc/foo-bin/files/foo.patch"},
+		{Content: []byte("service content"), Path: "app-misc/foo-bin/files/systemd/foo.service"},
+		{Content: []byte("<pkgmetadata></pkgmetadata>"), Path: "app-misc/foo-bin/metadata.xml"},
 	}
 
-	err := handleGentooManifestAndMetadata(ctx, cfg, nil, client.Repo{}, &files, nil)
+	err := handleGentooManifestAndMetadata(ctx, cfg, nil, &files, nil)
 	require.NoError(t, err)
 
 	manifestIdx := len(files) - 1
 	manifestContent := string(files[manifestIdx].Content)
 	require.Contains(t, manifestContent, "DIST foo_1.0.0_linux_amd64.tar.gz")
-	require.Contains(t, manifestContent, "EBUILD foo-1.0.0.ebuild")
+	require.Contains(t, manifestContent, "EBUILD foo-bin-1.0.0.ebuild")
 	require.Contains(t, manifestContent, "AUX foo.patch")
 	require.Contains(t, manifestContent, "AUX systemd/foo.service")
 	require.Contains(t, manifestContent, "MISC metadata.xml")
@@ -564,22 +613,22 @@ func TestHandleGentooManifestThin(t *testing.T) {
 	})
 
 	files := []client.RepoFile{
-		{Content: []byte("ebuild content"), Path: "app-misc/foo/foo-1.0.0.ebuild"},
-		{Content: []byte("patch content"), Path: "app-misc/foo/files/foo.patch"},
-		{Content: []byte("<pkgmetadata></pkgmetadata>"), Path: "app-misc/foo/metadata.xml"},
+		{Content: []byte("ebuild content"), Path: "app-misc/foo-bin/foo-bin-1.0.0.ebuild"},
+		{Content: []byte("patch content"), Path: "app-misc/foo-bin/files/foo.patch"},
+		{Content: []byte("<pkgmetadata></pkgmetadata>"), Path: "app-misc/foo-bin/metadata.xml"},
 	}
 
 	downloader := mockFileDownloader{
 		content: []byte("manifest-hashes = SHA256\nthin-manifests = true\n"),
 	}
 
-	err := handleGentooManifestAndMetadata(ctx, cfg, downloader, client.Repo{}, &files, nil)
+	err := handleGentooManifestAndMetadata(ctx, cfg, downloader, &files, nil)
 	require.NoError(t, err)
 
 	manifestIdx := len(files) - 1
 	manifestContent := string(files[manifestIdx].Content)
 	require.Contains(t, manifestContent, "DIST foo_1.0.0_linux_amd64.tar.gz")
-	require.NotContains(t, manifestContent, "EBUILD foo-1.0.0.ebuild")
+	require.NotContains(t, manifestContent, "EBUILD foo-bin-1.0.0.ebuild")
 	require.NotContains(t, manifestContent, "AUX foo.patch")
 	require.NotContains(t, manifestContent, "MISC metadata.xml")
 }
@@ -604,8 +653,8 @@ func TestHandleGentooManifestThickExcludesMetaCache(t *testing.T) {
 	})
 
 	files := []client.RepoFile{
-		{Content: []byte("ebuild content"), Path: "app-misc/foo/foo-1.0.0.ebuild"},
-		{Content: []byte("<pkgmetadata></pkgmetadata>"), Path: "app-misc/foo/metadata.xml"},
+		{Content: []byte("ebuild content"), Path: "app-misc/foo-bin/foo-bin-1.0.0.ebuild"},
+		{Content: []byte("<pkgmetadata></pkgmetadata>"), Path: "app-misc/foo-bin/metadata.xml"},
 		{Content: []byte("cache content"), Path: "metadata/md5-cache/app-misc/foo-1.0.0"},
 	}
 
@@ -613,19 +662,19 @@ func TestHandleGentooManifestThickExcludesMetaCache(t *testing.T) {
 		content: []byte("thin-manifests = false\n"),
 	}
 
-	err := handleGentooManifestAndMetadata(ctx, cfg, downloader, client.Repo{}, &files, nil)
+	err := handleGentooManifestAndMetadata(ctx, cfg, downloader, &files, nil)
 	require.NoError(t, err)
 
 	var manifestContent string
 	for _, f := range files {
-		if f.Path == "app-misc/foo/Manifest" {
+		if f.Path == "app-misc/foo-bin/Manifest" {
 			manifestContent = string(f.Content)
 			break
 		}
 	}
 
 	require.NotEmpty(t, manifestContent)
-	require.Contains(t, manifestContent, "EBUILD foo-1.0.0.ebuild")
+	require.Contains(t, manifestContent, "EBUILD foo-bin-1.0.0.ebuild")
 	require.Contains(t, manifestContent, "MISC metadata.xml")
 	require.NotContains(t, manifestContent, "MISC foo-1.0.0")
 	require.NotContains(t, manifestContent, "md5-cache")
@@ -645,41 +694,6 @@ func (m mockFileDownloader) DownloadFile(_ *import_context.Context, _ client.Rep
 		return m.content, nil
 	}
 	return nil, client.ErrNotFound
-}
-
-func TestHandleGentooManifestPreservesAuxWithDynamicReference(t *testing.T) {
-	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
-	cfg := config.Gentoo{
-		Category: "app-misc",
-		Name:     "foo",
-	}
-	downloader := mockFileDownloader{
-		content: []byte("thin-manifests = false\n"),
-		contents: map[string][]byte{
-			"app-misc/foo/Manifest":         []byte("EBUILD foo-1.0.0.ebuild 1 BLAKE2B deadbeef\nAUX foo-1.0.patch 1 BLAKE2B deadbeef\n"),
-			"app-misc/foo/foo-1.0.0.ebuild": []byte("PATCHES=( \"${PN}-${PV}.patch\" )\n"),
-		},
-	}
-
-	var files []client.RepoFile
-	require.NoError(t, handleGentooManifestAndMetadata(ctx, cfg, downloader, client.Repo{}, &files, nil))
-	require.Len(t, files, 1)
-	require.Contains(t, string(files[0].Content), "AUX foo-1.0.patch")
-}
-
-func TestCountNewEbuildsExcludesExistingVersions(t *testing.T) {
-	counts := countNewEbuilds(
-		[]string{"foo-1.0.0_rc1.ebuild"},
-		[]string{"foo-1.0.0_rc1.ebuild", "foo-1.0.0_rc2.ebuild"},
-		func(name string) string {
-			if strings.Contains(name, "_rc") {
-				return "rc"
-			}
-			return "stable"
-		},
-	)
-
-	require.Equal(t, map[string]int{"rc": 1}, counts)
 }
 
 func TestHandleGentooManifestUnsupportedHash(t *testing.T) {
@@ -707,7 +721,7 @@ func TestHandleGentooManifestUnsupportedHash(t *testing.T) {
 	}
 
 	var files []client.RepoFile
-	err := handleGentooManifestAndMetadata(ctx, cfg, mockClient, client.Repo{}, &files, nil)
+	err := handleGentooManifestAndMetadata(ctx, cfg, mockClient, &files, nil)
 	require.ErrorContains(t, err, "unsupported manifest hash algorithm: WHIRLPOOL")
 }
 
@@ -821,19 +835,18 @@ func TestTemplateScenarios(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			installers, err := lowerInstallItemsFromConfig("doexe", tc.doexe, "/opt/bin")
 			require.NoError(t, err)
-			plan := buildInstallPlan(tc.bindir, nil, "", nil, installers, nil, nil, nil)
+			plan := (&installProgramBuilder{bindir: tc.bindir, explicit: installers}).Build()
 			require.NoError(t, plan.Validate())
-			reducedPlan := plan.reducePlan()
+			reducedPlan := plan.Reduce()
 			require.NoError(t, reducedPlan.Validate())
-			data := ebuildData{
+			data := Ebuild{
 				Description: "test scenario ebuild",
 				License:     "MIT",
-				Bindir:      "/usr/bin",
 				UseFlags:    gentooUseFlags(config.Gentoo{}),
 				Plan:        reducedPlan,
 			}
 			require.NoError(t, data.Validate())
-			content, err := data.RenderEbuild()
+			content, err := data.Render()
 			require.NoError(t, err)
 			golden.RequireEqualTxt(t, []byte(content))
 		})
@@ -1059,84 +1072,6 @@ func TestGentooUseFlagsIncludesInstallConditions(t *testing.T) {
 	}, flags)
 }
 
-func TestGentooVersionPMSOrdering(t *testing.T) {
-	tests := []struct {
-		v1       string
-		v2       string
-		expected int
-	}{
-		// Gentoo PMS suffix order: _alpha < _beta < _pre < _rc < release < _p
-		{"foo-1.0_alpha1.ebuild", "foo-1.0_beta1.ebuild", -1},
-		{"foo-1.0_beta1.ebuild", "foo-1.0_pre1.ebuild", -1},
-		{"foo-1.0_pre1.ebuild", "foo-1.0_rc1.ebuild", -1},
-		{"foo-1.0_rc1.ebuild", "foo-1.0.ebuild", -1},
-		{"foo-1.0.ebuild", "foo-1.0_p1.ebuild", -1},
-		{"foo-1.0_p1.ebuild", "foo-1.0_p2.ebuild", -1},
-
-		// Revision order
-		{"foo-1.0.ebuild", "foo-1.0-r1.ebuild", -1},
-		{"foo-1.0-r1.ebuild", "foo-1.0-r2.ebuild", -1},
-		{"foo-1.0_p1-r1.ebuild", "foo-1.0_p1-r2.ebuild", -1},
-
-		// Base numbers and letters
-		{"foo-1.0.0.ebuild", "foo-1.1.0.ebuild", -1},
-		{"foo-1.2.ebuild", "foo-1.10.ebuild", -1},
-		{"foo-1.2.3.ebuild", "foo-1.2.3a.ebuild", -1},
-		{"foo-1.2.3a.ebuild", "foo-1.2.3b.ebuild", -1},
-		{"foo-1.01.ebuild", "foo-1.1.ebuild", -1},
-		{"foo-1.0.0.ebuild", "foo-1.0.ebuild", 1},
-
-		// Equal versions
-		{"foo-1.0.0.ebuild", "foo-1.0.0.ebuild", 0},
-		{"foo-1.0_p1-r2.ebuild", "foo-1.0_p1-r2.ebuild", 0},
-
-		// Chained suffixes
-		{"foo-1.0_alpha1_p1.ebuild", "foo-1.0_alpha1_p2.ebuild", -1},
-		{"foo-1.0_alpha1_beta1.ebuild", "foo-1.0_alpha1_beta2.ebuild", -1},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.v1+" vs "+tt.v2, func(t *testing.T) {
-			p1 := parseGentooVersion(tt.v1, "foo-")
-			p2 := parseGentooVersion(tt.v2, "foo-")
-			require.NotNil(t, p1)
-			require.NotNil(t, p2)
-			cmp := p1.Compare(p2)
-			require.Equal(t, tt.expected, cmp)
-			if tt.expected < 0 {
-				require.True(t, p2.GreaterThan(p1))
-				require.False(t, p1.GreaterThan(p2))
-			} else if tt.expected > 0 {
-				require.True(t, p1.GreaterThan(p2))
-				require.False(t, p2.GreaterThan(p1))
-			}
-		})
-	}
-}
-
-func TestGentooVersionBuckets(t *testing.T) {
-	tests := []struct {
-		file     string
-		expected string
-	}{
-		{"foo-1.0_alpha1.ebuild", "alpha"},
-		{"foo-1.0_beta2.ebuild", "beta"},
-		{"foo-1.0_pre3.ebuild", "pre"},
-		{"foo-1.0_rc1.ebuild", "rc"},
-		{"foo-1.0.ebuild", "stable"},
-		{"foo-1.0_p1.ebuild", "stable"},
-		{"foo-1.0_p2-r1.ebuild", "stable"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.file, func(t *testing.T) {
-			v := parseGentooVersion(tt.file, "foo-")
-			require.NotNil(t, v)
-			require.Equal(t, tt.expected, getVersionBucket(v))
-		})
-	}
-}
-
 func TestGentooArch(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1356,11 +1291,13 @@ func TestExtraFileValidator(t *testing.T) {
 		require.False(t, ef.inArchives("bar.service"))
 
 		arches[0].Extra[artifact.ExtraFiles] = []string{"share/foo.service"}
+		ef = newExtraFilesProcessor(config.Gentoo{}, arches, nil)
 		require.False(t, ef.inArchives("foo.service"))
 
 		arches[0].Extra[artifact.ExtraFiles] = []string{"foo.service"}
 		arches[0].Extra[artifact.ExtraWrappedIn] = "release"
 		arches[1].Extra[artifact.ExtraWrappedIn] = "release"
+		ef = newExtraFilesProcessor(config.Gentoo{}, arches, nil)
 		require.False(t, ef.inArchives("foo.service"))
 		require.True(t, ef.inArchives("release/foo.service"))
 	})
@@ -1435,13 +1372,10 @@ func TestSkipUpload(t *testing.T) {
 			},
 		})
 		ctx.Artifacts.Add(&artifact.Artifact{
-			Name: "foo.ebuild",
-			Path: "dist/foo.ebuild",
-			Type: artifact.GentooEbuild,
-			Extra: map[string]any{
-				ebuildExtra:     ctx.Config.Gentoos[0],
-				ebuildPathExtra: "app-misc/foo/foo-1.0.0.ebuild",
-			},
+			Name:  "foo.ebuild",
+			Path:  "dist/foo.ebuild",
+			Type:  artifact.GentooEbuild,
+			Extra: gentooArtifactExtra("default", "app-misc/foo-bin/foo-bin-1.0.0.ebuild"),
 		})
 		err := Pipe{}.Publish(ctx)
 		require.NoError(t, err)
@@ -1458,13 +1392,10 @@ func TestSkipUpload(t *testing.T) {
 		})
 		ctx.Semver = import_context.Semver{Prerelease: "beta.1"}
 		ctx.Artifacts.Add(&artifact.Artifact{
-			Name: "foo.ebuild",
-			Path: "dist/foo.ebuild",
-			Type: artifact.GentooEbuild,
-			Extra: map[string]any{
-				ebuildExtra:     ctx.Config.Gentoos[0],
-				ebuildPathExtra: "app-misc/foo/foo-1.0.0.ebuild",
-			},
+			Name:  "foo.ebuild",
+			Path:  "dist/foo.ebuild",
+			Type:  artifact.GentooEbuild,
+			Extra: gentooArtifactExtra("default", "app-misc/foo-bin/foo-bin-1.0.0.ebuild"),
 		})
 		err := Pipe{}.Publish(ctx)
 		require.NoError(t, err)
@@ -1500,17 +1431,16 @@ func TestConflictResolutionFail(t *testing.T) {
 		require.NoError(t, Pipe{}.Default(ctx))
 		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
 
-		groups, err := collectPublishGroups(ctx)
-		require.NoError(t, err)
-		require.Len(t, groups, 1)
-
 		clientMock := &client.Mock{
 			DirFiles: map[string][]string{
 				"app-misc/foo-bin": {"foo-bin-1.0.0.ebuild"},
 			},
+			Files: map[string][]byte{
+				"app-misc/foo-bin/foo-bin-1.0.0.ebuild": []byte("EAPI=8\n"),
+			},
 		}
 
-		require.NoError(t, groups[0].publish(ctx, clientMock))
+		require.NoError(t, publishGenerated(ctx, clientMock))
 	})
 
 	t.Run("fails when generated ebuild filename already exists", func(t *testing.T) {
@@ -1541,17 +1471,13 @@ func TestConflictResolutionFail(t *testing.T) {
 		require.NoError(t, Pipe{}.Default(ctx))
 		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
 
-		groups, err := collectPublishGroups(ctx)
-		require.NoError(t, err)
-		require.Len(t, groups, 1)
-
 		clientMock := &client.Mock{
 			DirFiles: map[string][]string{
 				"app-misc/foo-bin": {"foo-bin-1.0.0.ebuild"},
 			},
 		}
 
-		err = groups[0].publish(ctx, clientMock)
+		err := publishGenerated(ctx, clientMock)
 		require.EqualError(t, err, "ebuild foo-bin-1.0.0.ebuild already exists in app-misc/foo-bin")
 	})
 
@@ -1583,10 +1509,6 @@ func TestConflictResolutionFail(t *testing.T) {
 		require.NoError(t, Pipe{}.Default(ctx))
 		require.NoError(t, doRun(ctx, ctx.Config.Gentoos[0], client.NewMock()))
 
-		groups, err := collectPublishGroups(ctx)
-		require.NoError(t, err)
-		require.Len(t, groups, 1)
-
 		clientMock := &client.Mock{
 			Files: map[string][]byte{
 				"metadata/layout.conf":      []byte("thin-manifests = false\n"),
@@ -1594,7 +1516,7 @@ func TestConflictResolutionFail(t *testing.T) {
 			},
 		}
 
-		err = groups[0].publish(ctx, clientMock)
+		err := publishGenerated(ctx, clientMock)
 		require.EqualError(t, err, "ebuild foo-bin-1.0.0.ebuild already exists in app-misc/foo-bin")
 	})
 }
@@ -1691,13 +1613,7 @@ func TestMetaCache(t *testing.T) {
 	})
 
 	t.Run("meta_cache disabled by layout.conf", func(t *testing.T) {
-		repoClient := mockFileDownloader{
-			content: []byte("cache-formats = pms\n"),
-		}
-		settings, err := loadOverlaySettings(testctx.Wrap(t.Context()), config.Gentoo{
-			MetaCache: true,
-		}, repoClient, client.Repo{})
-		require.NoError(t, err)
+		settings := ParseLayout([]byte("cache-formats = pms\n"))
 		metaCacheAllowed := !settings.hasCacheFormatsConfigured || slices.Contains(settings.cacheFormats, "md5-dict") || slices.Contains(settings.cacheFormats, "md5-cache")
 		require.False(t, metaCacheAllowed)
 	})
@@ -1710,97 +1626,50 @@ func TestMetaCache(t *testing.T) {
 
 		ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
 
-		g := publishGroup{
-			cfg: config.Gentoo{
-				Name:        "foo",
-				Category:    "app-misc",
-				MetaCache:   true,
-				OverlayPath: "my-overlay",
-				CommitAuthor: config.CommitAuthor{
-					Name:  "Test",
-					Email: "test@test.com",
-				},
-				CommitMessageTemplate: "test",
+		raw := config.Gentoo{
+			Name:        "foo",
+			Category:    "app-misc",
+			MetaCache:   true,
+			OverlayPath: "my-overlay",
+			CommitAuthor: config.CommitAuthor{
+				Name:  "Test",
+				Email: "test@test.com",
 			},
-			files: []client.RepoFile{
-				{Path: "my-overlay/metadata/md5-cache/app-misc/foo-1.0.0", Content: []byte("cache")},
-				{Path: "my-overlay/app-misc/foo/foo-1.0.0.ebuild", Content: []byte("ebuild")},
-			},
+			CommitMessageTemplate: "test",
 		}
-
-		err := g.publish(ctx, repoClient)
+		cfg := &GentooConfig{raw: raw}
+		publisher, err := NewPublisher(ctx, cfg, nil, repoClient)
 		require.NoError(t, err)
-
-		require.Len(t, g.files, 2)
-		require.Equal(t, "my-overlay/app-misc/foo/foo-1.0.0.ebuild", g.files[0].Path)
-		require.Equal(t, "my-overlay/app-misc/foo/Manifest", g.files[1].Path)
-	})
-}
-
-func TestEbuildDeleter(t *testing.T) {
-	t.Run("does not delete a missing metadata cache entry", func(t *testing.T) {
-		var files []client.RepoFile
-		var deleted []string
-		deleter := &ebuildDeleter{
-			dir:            "app-misc/foo-bin",
-			metaCacheDir:   "metadata/md5-cache/app-misc",
-			files:          &files,
-			deletedEbuilds: &deleted,
-		}
-
-		deleter.Delete("foo-bin-1.0.0.ebuild")
-
-		require.Equal(t, []string{"foo-bin-1.0.0.ebuild"}, deleted)
-		require.Equal(t, []client.RepoFile{{
-			Path:   "app-misc/foo-bin/foo-bin-1.0.0.ebuild",
-			Delete: true,
-		}}, files)
-	})
-
-	t.Run("deletes an existing metadata cache entry", func(t *testing.T) {
-		var files []client.RepoFile
-		var deleted []string
-		deleter := &ebuildDeleter{
-			dir:            "app-misc/foo-bin",
-			metaCacheDir:   "metadata/md5-cache/app-misc",
-			metaCacheFiles: map[string]struct{}{"foo-bin-1.0.0": {}},
-			files:          &files,
-			deletedEbuilds: &deleted,
-		}
-
-		deleter.Delete("foo-bin-1.0.0.ebuild")
-
-		require.Len(t, deleted, 1)
-		require.Equal(t, "foo-bin-1.0.0.ebuild", deleted[0])
-		require.Len(t, files, 2)
-		require.Equal(t, "app-misc/foo-bin/foo-bin-1.0.0.ebuild", files[0].Path)
-		require.True(t, files[0].Delete)
-		require.Equal(t, "metadata/md5-cache/app-misc/foo-bin-1.0.0", files[1].Path)
-		require.True(t, files[1].Delete)
+		files := publisher.filterMetaCache(NewChangeSet(
+			client.RepoFile{Path: "my-overlay/metadata/md5-cache/app-misc/foo-1.0.0", Content: []byte("cache")},
+			client.RepoFile{Path: "my-overlay/app-misc/foo-bin/foo-bin-1.0.0.ebuild", Content: []byte("ebuild")},
+		), Layout{hasCacheFormatsConfigured: true, cacheFormats: []string{"pms"}}).Files()
+		require.Len(t, files, 1)
+		require.Equal(t, "my-overlay/app-misc/foo-bin/foo-bin-1.0.0.ebuild", files[0].Path)
 	})
 }
 
 func TestEbuildData(t *testing.T) {
 	t.Run("Validate invalid dosym", func(t *testing.T) {
-		data := ebuildData{
+		data := Ebuild{
 			Description: "foo",
 			License:     "MIT",
-			Plan:        &installPlan{Body: []installStmt{actionStmt{Op: OpDosym, Source: "foo"}}},
+			Plan:        &InstallProgram{Body: []installStmt{actionStmt{Op: OpDosym, Source: "foo"}}},
 		}
 		require.EqualError(t, data.Validate(), "dosym requires a destination")
 	})
 
 	t.Run("Validate valid dosym", func(t *testing.T) {
-		data := ebuildData{
+		data := Ebuild{
 			Description: "foo",
 			License:     "MIT",
-			Plan:        &installPlan{Body: []installStmt{actionStmt{Op: OpDosym, Source: "foo", Target: "bar"}}},
+			Plan:        &InstallProgram{Body: []installStmt{actionStmt{Op: OpDosym, Source: "foo", Target: "bar"}}},
 		}
 		require.NoError(t, data.Validate())
 	})
 
 	t.Run("SortedUseFlags", func(t *testing.T) {
-		data := ebuildData{
+		data := Ebuild{
 			UseFlags: []config.GentooUseFlag{
 				{Flag: "systemd"},
 				{Flag: "doc"},
@@ -1813,7 +1682,7 @@ func TestEbuildData(t *testing.T) {
 	})
 
 	t.Run("FormattedSrcURIs", func(t *testing.T) {
-		data := ebuildData{
+		data := Ebuild{
 			Archs: []archData{
 				{Keyword: "amd64", URIs: []archItem{{File: "foo.tar.gz", URI: "https://example.com/foo.tar.gz"}}},
 				{Keyword: "arm64", URIs: []archItem{{File: "foo-arm64.tar.gz", URI: "https://example.com/foo-arm64.tar.gz"}}},
@@ -1828,33 +1697,33 @@ func TestEbuildData(t *testing.T) {
 	})
 
 	t.Run("RenderEbuild", func(t *testing.T) {
-		data := ebuildData{
+		data := Ebuild{
 			Name:        "foo",
 			Description: "Foo package",
 			Homepage:    "https://example.com",
 			License:     "MIT",
 			Keywords:    "amd64",
 		}
-		content, err := data.RenderEbuild()
+		content, err := data.Render()
 		require.NoError(t, err)
 		require.Contains(t, content, `DESCRIPTION="Foo package"`)
 		require.Contains(t, content, `HOMEPAGE="https://example.com"`)
 	})
 
 	t.Run("RenderEbuild with custom eclasses", func(t *testing.T) {
-		data := ebuildData{
+		data := Ebuild{
 			Name:        "foo",
 			Description: "Foo package",
 			License:     "MIT",
 			Eclasses:    []string{"systemd", "desktop", "systemd"},
 		}
-		content, err := data.RenderEbuild()
+		content, err := data.Render()
 		require.NoError(t, err)
 		require.Contains(t, content, "inherit systemd desktop")
 	})
 
 	t.Run("RenderMetaCache", func(t *testing.T) {
-		data := ebuildData{
+		data := Ebuild{
 			Description: "Foo package",
 			Homepage:    "https://example.com",
 			License:     "MIT",
@@ -1878,7 +1747,7 @@ func TestInstallExtraFiles(t *testing.T) {
 	srcFile := filepath.Join(tmpDir, "foo.conf")
 	require.NoError(t, os.WriteFile(srcFile, []byte("conf content"), 0o644))
 
-	ebuildPath := filepath.Join(tmpDir, "app-misc", "foo", "foo-1.0.0.ebuild")
+	ebuildPath := filepath.Join(tmpDir, "app-misc", "foo", "foo-bin-1.0.0.ebuild")
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
 		Dist: tmpDir,
 	})
@@ -1906,20 +1775,19 @@ func TestInstallExtraFiles(t *testing.T) {
 
 func TestGentooMetadata(t *testing.T) {
 	t.Run("AddMaintainers valid and empty email", func(t *testing.T) {
-		var meta gentooMetadata
+		var meta Metadata
 		err := meta.AddMaintainers([]config.GentooMaintainer{
 			{Name: "Alice", Email: "alice@example.com"},
 		})
 		require.NoError(t, err)
-		require.Len(t, meta.Maintainers, 1)
-		require.Equal(t, "alice@example.com", meta.Maintainers[0].Email)
+		require.Equal(t, []string{"alice@example.com"}, meta.MaintainerEmails())
 
 		err = meta.AddMaintainers([]config.GentooMaintainer{{Name: "Invalid"}})
 		require.EqualError(t, err, "maintainer email is required")
 	})
 
 	t.Run("AddUseFlags and SetUpstream and Marshal", func(t *testing.T) {
-		var meta gentooMetadata
+		var meta Metadata
 		meta.AddUseFlags([]config.GentooUseFlag{
 			{Flag: "systemd", Description: "Enable systemd"},
 		})
@@ -1933,7 +1801,7 @@ func TestGentooMetadata(t *testing.T) {
 	})
 
 	t.Run("AddUseFlags modifies existing", func(t *testing.T) {
-		var meta gentooMetadata
+		var meta Metadata
 		meta.AddUseFlags([]config.GentooUseFlag{
 			{Flag: "systemd", Description: "Enable systemd old"},
 		})
@@ -1958,111 +1826,12 @@ func TestHandleGentooManifestAndMetadataMalformedXML(t *testing.T) {
 
 	cli := client.NewMock()
 	cli.Files = map[string][]byte{
-		"app-misc/foo/metadata.xml": []byte("<malformed xml"),
+		"app-misc/foo-bin/metadata.xml": []byte("<malformed xml"),
 	}
 
 	var files []client.RepoFile
-	err := handleGentooManifestAndMetadata(ctx, cfg, cli, client.Repo{}, &files, nil)
+	err := handleGentooManifestAndMetadata(ctx, cfg, cli, &files, nil)
 	require.ErrorContains(t, err, "failed to parse metadata.xml")
-}
-
-func TestUpdateVersions(t *testing.T) {
-	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
-	stateRepo := client.Repo{Owner: "owner", Name: "repo"}
-
-	t.Run("no matching ebuilds", func(t *testing.T) {
-		g := &publishGroup{
-			files: []client.RepoFile{
-				{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\n")},
-			},
-		}
-		dl := mockFileDownloader{}
-		g.updateVersions(ctx, dl, stateRepo, "app-misc/foo", "foo-", nil)
-		require.Equal(t, "app-misc/foo/foo-1.0.0.ebuild", g.files[0].Path)
-	})
-
-	t.Run("existing ebuild content identical does not bump revision", func(t *testing.T) {
-		dl := mockFileDownloader{
-			contents: map[string][]byte{
-				"app-misc/foo/foo-1.0.0-r1.ebuild": []byte("# comment\nEAPI=8\nDESCRIPTION=\"foo\"\n"),
-			},
-		}
-		g := &publishGroup{
-			files: []client.RepoFile{
-				{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\nDESCRIPTION=\"foo\"\n")},
-			},
-		}
-		g.updateVersions(ctx, dl, stateRepo, "app-misc/foo", "foo-", []string{"foo-1.0.0.ebuild", "foo-1.0.0-r1.ebuild"})
-		require.Equal(t, "app-misc/foo/foo-1.0.0-r1.ebuild", g.files[0].Path)
-	})
-
-	t.Run("existing ebuild content different bumps revision", func(t *testing.T) {
-		dl := mockFileDownloader{
-			contents: map[string][]byte{
-				"app-misc/foo/foo-1.0.0-r1.ebuild": []byte("EAPI=8\nDESCRIPTION=\"old\"\n"),
-			},
-		}
-		g := &publishGroup{
-			cfg: config.Gentoo{Category: "app-misc"},
-			files: []client.RepoFile{
-				{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\nDESCRIPTION=\"new\"\n")},
-				{Path: "metadata/md5-cache/app-misc/foo-1.0.0", Content: []byte("cache")},
-			},
-		}
-		g.updateVersions(ctx, dl, stateRepo, "app-misc/foo", "foo-", []string{"foo-1.0.0.ebuild", "foo-1.0.0-r1.ebuild"})
-		require.Equal(t, "app-misc/foo/foo-1.0.0-r2.ebuild", g.files[0].Path)
-		require.Equal(t, "metadata/md5-cache/app-misc/foo-1.0.0-r2", g.files[1].Path)
-	})
-
-	t.Run("existing ebuild matches but extra file content changed bumps revision", func(t *testing.T) {
-		dl := mockFileDownloader{
-			contents: map[string][]byte{
-				"app-misc/foo/foo-1.0.0.ebuild": []byte("EAPI=8\n"),
-				"app-misc/foo/files/extra.conf": []byte("old content"),
-			},
-		}
-		g := &publishGroup{
-			files: []client.RepoFile{
-				{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\n")},
-				{Path: "app-misc/foo/files/extra.conf", Content: []byte("new content")},
-			},
-		}
-		g.updateVersions(ctx, dl, stateRepo, "app-misc/foo", "foo-", []string{"foo-1.0.0.ebuild"})
-		require.Equal(t, "app-misc/foo/foo-1.0.0-r1.ebuild", g.files[0].Path)
-	})
-
-	t.Run("skipped deleted and non-ebuild files", func(t *testing.T) {
-		dl := mockFileDownloader{}
-		g := &publishGroup{
-			files: []client.RepoFile{
-				{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\n"), Delete: true},
-				{Path: "app-misc/foo/Manifest", Content: []byte("EBUILD..."), Delete: false},
-			},
-		}
-		g.updateVersions(ctx, dl, stateRepo, "app-misc/foo", "foo-", []string{"foo-1.0.0.ebuild"})
-		require.Equal(t, "app-misc/foo/foo-1.0.0.ebuild", g.files[0].Path)
-		require.Equal(t, "app-misc/foo/Manifest", g.files[1].Path)
-	})
-}
-
-func TestApplyVersionRetentionErrNotImplemented(t *testing.T) {
-	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
-	stateRepo := client.Repo{Owner: "owner", Name: "repo"}
-
-	cli := client.NewMock() // Mock returns ErrNotImplemented for ListDir
-	g := &publishGroup{
-		cfg: config.Gentoo{
-			Category: "app-misc",
-			Name:     "foo",
-		},
-		files: []client.RepoFile{
-			{Path: "app-misc/foo/foo-1.0.0.ebuild", Content: []byte("EAPI=8\n")},
-		},
-	}
-
-	deleted, err := g.applyVersionRetention(ctx, cli, stateRepo)
-	require.NoError(t, err)
-	require.Nil(t, deleted)
 }
 
 func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
@@ -2244,96 +2013,6 @@ func TestGentooSrcIDAndMultiArchiveSupport(t *testing.T) {
 		require.NoError(t, Pipe{}.Default(ctx))
 		err := doRun(ctx, ctx.Config.Gentoos[0], client.NewMock())
 		require.ErrorContains(t, err, `multiple linux archives map to Gentoo architecture "amd64" for ID "default"`)
-	})
-
-	t.Run("collectSuppressedIDs handles all install item lists", func(t *testing.T) {
-		cfg := config.Gentoo{
-			Dobin:    []config.GentooInstallItem{{SrcID: "id1"}},
-			Doconfd:  []config.GentooInstallItem{{SrcID: "id2"}},
-			Doenvd:   []config.GentooInstallItem{{SrcID: "id3"}},
-			Doexe:    []config.GentooInstallItem{{SrcID: "id4"}},
-			Doheader: []config.GentooInstallItem{{SrcID: "id5"}},
-			Doinitd:  []config.GentooInstallItem{{SrcID: "id6"}},
-			Doins:    []config.GentooInstallItem{{SrcID: "id7"}},
-			Dosbin:   []config.GentooInstallItem{{SrcID: "id8"}},
-			Dosym:    []config.GentooInstallItem{{SrcID: "id9"}},
-			Systemd:  []config.GentooInstallItem{{SrcID: "id10"}},
-		}
-
-		suppressed := collectSuppressedIDs(cfg)
-		for i := 1; i <= 10; i++ {
-			archs, ok := suppressed[fmt.Sprintf("id%d", i)]
-			require.True(t, ok && len(archs) == 0)
-		}
-		_, ok := suppressed["unsuppressed_id"]
-		require.False(t, ok)
-	})
-
-	t.Run("collectSuppressedIDs unions multiple arch-specific entries for same src_id", func(t *testing.T) {
-		cfg := config.Gentoo{
-			Doexe: []config.GentooInstallItem{
-				{SrcID: "id1", Archs: []string{"amd64"}},
-				{SrcID: "id1", Archs: []string{"arm64"}},
-			},
-			Dobin: []config.GentooInstallItem{
-				{SrcID: "id2", Archs: []string{"amd64"}},
-			},
-			Doins: []config.GentooInstallItem{
-				{SrcID: "id2", Archs: []string{"arm"}},
-			},
-		}
-
-		suppressed := collectSuppressedIDs(cfg)
-		require.ElementsMatch(t, []string{"amd64", "arm64"}, suppressed["id1"])
-		require.ElementsMatch(t, []string{"amd64", "arm"}, suppressed["id2"])
-	})
-
-	t.Run("collectSuppressedIDs arch-specific entry followed by global entry", func(t *testing.T) {
-		cfg := config.Gentoo{
-			Doexe: []config.GentooInstallItem{
-				{SrcID: "id1", Archs: []string{"amd64"}},
-				{SrcID: "id1"},
-			},
-			Dobin: []config.GentooInstallItem{
-				{SrcID: "id2", Archs: []string{"amd64"}},
-			},
-			Doins: []config.GentooInstallItem{
-				{SrcID: "id2"},
-			},
-		}
-
-		suppressed := collectSuppressedIDs(cfg)
-		archs1, ok1 := suppressed["id1"]
-		require.True(t, ok1)
-		require.Empty(t, archs1)
-
-		archs2, ok2 := suppressed["id2"]
-		require.True(t, ok2)
-		require.Empty(t, archs2)
-	})
-
-	t.Run("collectSuppressedIDs global entry followed by arch-specific entry", func(t *testing.T) {
-		cfg := config.Gentoo{
-			Doexe: []config.GentooInstallItem{
-				{SrcID: "id1"},
-				{SrcID: "id1", Archs: []string{"amd64"}},
-			},
-			Dobin: []config.GentooInstallItem{
-				{SrcID: "id2"},
-			},
-			Doins: []config.GentooInstallItem{
-				{SrcID: "id2", Archs: []string{"amd64"}},
-			},
-		}
-
-		suppressed := collectSuppressedIDs(cfg)
-		archs1, ok1 := suppressed["id1"]
-		require.True(t, ok1)
-		require.Empty(t, archs1)
-
-		archs2, ok2 := suppressed["id2"]
-		require.True(t, ok2)
-		require.Empty(t, archs2)
 	})
 
 	t.Run("unknown src_id returns error", func(t *testing.T) {
@@ -2699,23 +2378,23 @@ func TestHandleGentooManifestAndMetadataPrunesOnlyFullyDeletedBaseVersions(t *te
 	downloader := mockFileDownloader{
 		content: []byte("thin-manifests = false\n"),
 		contents: map[string][]byte{
-			"app-misc/foo/Manifest": []byte("DIST foo_1.0.0_linux_amd64.tar.gz 1 BLAKE2B deadbeef\nDIST foo_2.0.0_linux_amd64.tar.gz 1 BLAKE2B deadbeef\nEBUILD foo-1.0.0.ebuild 1 BLAKE2B deadbeef\nEBUILD foo-1.0.0-r1.ebuild 1 BLAKE2B deadbeef\nEBUILD foo-2.0.0.ebuild 1 BLAKE2B deadbeef\n"),
+			"app-misc/foo-bin/Manifest": []byte("DIST foo_1.0.0_linux_amd64.tar.gz 1 BLAKE2B deadbeef\nDIST foo_2.0.0_linux_amd64.tar.gz 1 BLAKE2B deadbeef\nEBUILD foo-bin-1.0.0.ebuild 1 BLAKE2B deadbeef\nEBUILD foo-bin-1.0.0-r1.ebuild 1 BLAKE2B deadbeef\nEBUILD foo-bin-2.0.0.ebuild 1 BLAKE2B deadbeef\n"),
 		},
 	}
 
 	files := []client.RepoFile{
-		{Content: []byte("ebuild content"), Path: "app-misc/foo/foo-1.0.0-r1.ebuild"},
-		{Content: []byte("ebuild content"), Path: "app-misc/foo/foo-2.0.0.ebuild"},
+		{Content: []byte("ebuild content"), Path: "app-misc/foo-bin/foo-bin-1.0.0-r1.ebuild"},
+		{Content: []byte("ebuild content"), Path: "app-misc/foo-bin/foo-bin-2.0.0.ebuild"},
 	}
 
-	deletedEbuilds := []string{"foo-1.0.0.ebuild"}
+	deletedEbuilds := []string{"foo-bin-1.0.0.ebuild"}
 
-	err := handleGentooManifestAndMetadata(ctx, cfg, downloader, client.Repo{}, &files, deletedEbuilds)
+	err := handleGentooManifestAndMetadata(ctx, cfg, downloader, &files, deletedEbuilds)
 	require.NoError(t, err)
 
 	var manifestContent string
 	for _, f := range files {
-		if f.Path == "app-misc/foo/Manifest" {
+		if f.Path == "app-misc/foo-bin/Manifest" {
 			manifestContent = string(f.Content)
 			break
 		}
@@ -2726,9 +2405,9 @@ func TestHandleGentooManifestAndMetadataPrunesOnlyFullyDeletedBaseVersions(t *te
 	require.Contains(t, manifestContent, "DIST foo_1.0.0_linux_amd64.tar.gz")
 	require.Contains(t, manifestContent, "DIST foo_2.0.0_linux_amd64.tar.gz")
 	// The specific EBUILD 1.0.0 should be pruned though.
-	require.NotContains(t, manifestContent, "EBUILD foo-1.0.0.ebuild")
-	require.Contains(t, manifestContent, "EBUILD foo-1.0.0-r1.ebuild")
-	require.Contains(t, manifestContent, "EBUILD foo-2.0.0.ebuild")
+	require.NotContains(t, manifestContent, "EBUILD foo-bin-1.0.0.ebuild")
+	require.Contains(t, manifestContent, "EBUILD foo-bin-1.0.0-r1.ebuild")
+	require.Contains(t, manifestContent, "EBUILD foo-bin-2.0.0.ebuild")
 }
 
 func TestHandleGentooManifestAndMetadataPrunesFullyDeletedBaseVersions(t *testing.T) {
@@ -2757,24 +2436,24 @@ func TestHandleGentooManifestAndMetadataPrunesFullyDeletedBaseVersions(t *testin
 		content: []byte("thin-manifests = false\n"),
 		contents: map[string][]byte{
 			// Manifest starts with both 1.0.0 and 2.0.0
-			"app-misc/foo/Manifest": []byte("DIST foo_1.0.0_linux_amd64.tar.gz 1 BLAKE2B deadbeef\nDIST foo_2.0.0_linux_amd64.tar.gz 1 BLAKE2B deadbeef\nEBUILD foo-1.0.0.ebuild 1 BLAKE2B deadbeef\nEBUILD foo-2.0.0.ebuild 1 BLAKE2B deadbeef\n"),
+			"app-misc/foo-bin/Manifest": []byte("DIST foo_1.0.0_linux_amd64.tar.gz 1 BLAKE2B deadbeef\nDIST foo_2.0.0_linux_amd64.tar.gz 1 BLAKE2B deadbeef\nEBUILD foo-bin-1.0.0.ebuild 1 BLAKE2B deadbeef\nEBUILD foo-bin-2.0.0.ebuild 1 BLAKE2B deadbeef\n"),
 		},
 	}
 
 	// Only 2.0.0 is retained
 	files := []client.RepoFile{
-		{Content: []byte("ebuild content"), Path: "app-misc/foo/foo-2.0.0.ebuild"},
+		{Content: []byte("ebuild content"), Path: "app-misc/foo-bin/foo-bin-2.0.0.ebuild"},
 	}
 
 	// 1.0.0 is deleted
-	deletedEbuilds := []string{"foo-1.0.0.ebuild"}
+	deletedEbuilds := []string{"foo-bin-1.0.0.ebuild"}
 
-	err := handleGentooManifestAndMetadata(ctx, cfg, downloader, client.Repo{}, &files, deletedEbuilds)
+	err := handleGentooManifestAndMetadata(ctx, cfg, downloader, &files, deletedEbuilds)
 	require.NoError(t, err)
 
 	var manifestContent string
 	for _, f := range files {
-		if f.Path == "app-misc/foo/Manifest" {
+		if f.Path == "app-misc/foo-bin/Manifest" {
 			manifestContent = string(f.Content)
 			break
 		}
@@ -2784,8 +2463,8 @@ func TestHandleGentooManifestAndMetadataPrunesFullyDeletedBaseVersions(t *testin
 	// Base version 1.0.0 has no retained revisions, so its DIST should be pruned.
 	require.NotContains(t, manifestContent, "DIST foo_1.0.0_linux_amd64.tar.gz")
 	require.Contains(t, manifestContent, "DIST foo_2.0.0_linux_amd64.tar.gz")
-	require.NotContains(t, manifestContent, "EBUILD foo-1.0.0.ebuild")
-	require.Contains(t, manifestContent, "EBUILD foo-2.0.0.ebuild")
+	require.NotContains(t, manifestContent, "EBUILD foo-bin-1.0.0.ebuild")
+	require.Contains(t, manifestContent, "EBUILD foo-bin-2.0.0.ebuild")
 }
 
 func TestGentooArchSpecificSuppression(t *testing.T) {

@@ -126,6 +126,34 @@ func TestGetInstanceURLSuite(t *testing.T) {
 	suite.Run(t, new(GetInstanceURLSuite))
 }
 
+func TestGiteaListDirFiltersUnsupportedContentKinds(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/version":
+			fmt.Fprint(w, `{"version":"1.12.0"}`)
+		case "/api/v1/repos/owner/overlay/contents/pkg":
+			assert.Equal(t, "main", r.URL.Query().Get("ref"))
+			fmt.Fprint(w, `[
+				{"name":"Manifest","type":"file"},
+				{"name":"files","type":"dir"},
+				{"name":"linked","type":"symlink"},
+				{"name":"vendor","type":"submodule"}
+			]`)
+		default:
+			t.Fatalf("unhandled request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	t.Cleanup(srv.Close)
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{GiteaURLs: config.GiteaURLs{API: srv.URL}})
+	client, err := newGitea(ctx, "test-token")
+	require.NoError(t, err)
+
+	names, err := client.ListDir(ctx, Repo{Owner: "owner", Name: "overlay", Branch: "main"}, "pkg")
+	require.NoError(t, err)
+	require.Equal(t, []string{"Manifest", "files"}, names)
+}
+
 type GiteaReleasesTestSuite struct {
 	suite.Suite
 	url          string

@@ -260,7 +260,7 @@ func TestUniversalArchSimplification(t *testing.T) {
 	})
 
 	t.Run("reducer unwraps universal arch condition block (True)", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			UniverseArchitectures: universe,
 			Body: []installStmt{
 				conditionStmt{
@@ -271,14 +271,14 @@ func TestUniversalArchSimplification(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 1)
 		require.IsType(t, actionStmt{}, reduced.Body[0])
 		require.Equal(t, "doexe \"app\" || die \"Failed to install app\"\n", reduced.Body[0].String(""))
 	})
 
 	t.Run("reducer removes negated universal arch condition block (False)", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			UniverseArchitectures: universe,
 			Body: []installStmt{
 				conditionStmt{
@@ -289,12 +289,12 @@ func TestUniversalArchSimplification(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Empty(t, reduced.Body)
 	})
 
 	t.Run("reducer retains partial arch condition block", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			UniverseArchitectures: universe,
 			Body: []installStmt{
 				conditionStmt{
@@ -305,7 +305,7 @@ func TestUniversalArchSimplification(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 1)
 		require.IsType(t, conditionStmt{}, reduced.Body[0])
 	})
@@ -449,7 +449,7 @@ func TestSemanticInstallOperations(t *testing.T) {
 
 func TestDestinationStateModeling(t *testing.T) {
 	t.Run("same state repeated is deduplicated", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				stateStmt{Family: StateFamilyExe, Value: "/usr/bin"},
 				actionStmt{Op: OpDoexe, Source: "app1", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/usr/bin"}},
@@ -457,7 +457,7 @@ func TestDestinationStateModeling(t *testing.T) {
 				actionStmt{Op: OpDoexe, Source: "app2", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/usr/bin"}},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 3)
 		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: "/usr/bin"}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDoexe, Source: "app1", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/usr/bin"}}, reduced.Body[1])
@@ -465,7 +465,7 @@ func TestDestinationStateModeling(t *testing.T) {
 	})
 
 	t.Run("state change is retained", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				stateStmt{Family: StateFamilyExe, Value: "/usr/bin"},
 				actionStmt{Op: OpDoexe, Source: "app1", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/usr/bin"}},
@@ -473,25 +473,25 @@ func TestDestinationStateModeling(t *testing.T) {
 				actionStmt{Op: OpDoexe, Source: "app2", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/opt/bin"}},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 4)
 	})
 
 	t.Run("first required setter is retained when no initial state", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				stateStmt{Family: StateFamilyExe, Value: "/opt/bin"},
 				actionStmt{Op: OpDoexe, Source: "foo", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/opt/bin"}},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 2)
 		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: "/opt/bin"}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDoexe, Source: "foo", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/opt/bin"}}, reduced.Body[1])
 	})
 
 	t.Run("default initial state is suppressed at plan start", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				stateStmt{Family: StateFamilyBin, Value: "/usr"},
 				actionStmt{Op: OpDobin, Source: "bin1", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr"}},
@@ -499,28 +499,28 @@ func TestDestinationStateModeling(t *testing.T) {
 				actionStmt{Op: OpDodoc, Source: "README.md", RequiredState: StateRequirement{Family: StateFamilyDoc, Value: ""}},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 2)
 		require.Equal(t, actionStmt{Op: OpDobin, Source: "bin1", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr"}}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDodoc, Source: "README.md", RequiredState: StateRequirement{Family: StateFamilyDoc, Value: ""}}, reduced.Body[1])
 	})
 
 	t.Run("consecutive identical setters are deduplicated", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				stateStmt{Family: StateFamilyExe, Value: "/opt/bin"},
 				stateStmt{Family: StateFamilyExe, Value: "/opt/bin"},
 				actionStmt{Op: OpDoexe, Source: "foo", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/opt/bin"}},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 2)
 		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: "/opt/bin"}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDoexe, Source: "foo", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/opt/bin"}}, reduced.Body[1])
 	})
 
 	t.Run("conditional dataflow restores required state outside branch", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				stateStmt{Family: StateFamilyExe, Value: "/a"},
 				actionStmt{Op: OpDoexe, Source: "a", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/a"}},
@@ -535,7 +535,7 @@ func TestDestinationStateModeling(t *testing.T) {
 				actionStmt{Op: OpDoexe, Source: "y", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/a"}},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 5)
 		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: "/a"}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDoexe, Source: "a", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/a"}}, reduced.Body[1])
@@ -545,7 +545,7 @@ func TestDestinationStateModeling(t *testing.T) {
 	})
 
 	t.Run("insinto retention and deduplication", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				stateStmt{Family: StateFamilyIns, Value: "/etc/myapp"},
 				actionStmt{Op: OpDoins, Source: "config.yaml", RequiredState: StateRequirement{Family: StateFamilyIns, Value: "/etc/myapp"}},
@@ -553,7 +553,7 @@ func TestDestinationStateModeling(t *testing.T) {
 				actionStmt{Op: OpDoins, Source: "extra.yaml", RequiredState: StateRequirement{Family: StateFamilyIns, Value: "/etc/myapp"}},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 3)
 		require.Equal(t, stateStmt{Family: StateFamilyIns, Value: "/etc/myapp"}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDoins, Source: "config.yaml", RequiredState: StateRequirement{Family: StateFamilyIns, Value: "/etc/myapp"}}, reduced.Body[1])
@@ -561,7 +561,7 @@ func TestDestinationStateModeling(t *testing.T) {
 	})
 
 	t.Run("into and docinto retention and deduplication", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				stateStmt{Family: StateFamilyBin, Value: "/usr/local"},
 				actionStmt{Op: OpDobin, Source: "tool1", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr/local"}},
@@ -573,7 +573,7 @@ func TestDestinationStateModeling(t *testing.T) {
 				actionStmt{Op: OpDodoc, Source: "style.css", RequiredState: StateRequirement{Family: StateFamilyDoc, Value: "html"}},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 6)
 		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/usr/local"}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDobin, Source: "tool1", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr/local"}}, reduced.Body[1])
@@ -584,7 +584,7 @@ func TestDestinationStateModeling(t *testing.T) {
 	})
 
 	t.Run("state inside conditional is local and does not eliminate required state outside", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				conditionStmt{
 					Expr: UseExpr{Flag: "custom"},
@@ -597,7 +597,7 @@ func TestDestinationStateModeling(t *testing.T) {
 				actionStmt{Op: OpDoexe, Source: "app_main", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/opt/bin"}},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 3)
 		require.IsType(t, conditionStmt{}, reduced.Body[0])
 		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: "/opt/bin"}, reduced.Body[1])
@@ -605,7 +605,7 @@ func TestDestinationStateModeling(t *testing.T) {
 	})
 
 	t.Run("state families are independent (exeinto vs insinto vs into)", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				stateStmt{Family: StateFamilyExe, Value: "/usr/bin"},
 				stateStmt{Family: StateFamilyIns, Value: "/etc/myapp"},
@@ -615,7 +615,7 @@ func TestDestinationStateModeling(t *testing.T) {
 				actionStmt{Op: OpDobin, Source: "tool", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr/local"}},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 6)
 	})
 }
@@ -979,7 +979,7 @@ func TestOpDescriptors(t *testing.T) {
 
 func TestStateResetAndRestoration(t *testing.T) {
 	t.Run("custom dobin -> default dobin", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{
 					Op:            OpDobin,
@@ -993,7 +993,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 4)
 		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/usr/local"}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDobin, Source: "custom", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr/local"}}, reduced.Body[1])
@@ -1002,7 +1002,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("custom dobin -> default dosbin", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{
 					Op:            OpDobin,
@@ -1016,7 +1016,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 4)
 		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/usr/local"}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDobin, Source: "custom", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr/local"}}, reduced.Body[1])
@@ -1025,7 +1025,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("custom dosbin -> default dobin", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{
 					Op:            OpDosbin,
@@ -1039,7 +1039,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 4)
 		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/opt/foo"}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDosbin, Source: "custom", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/opt/foo"}}, reduced.Body[1])
@@ -1048,7 +1048,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("custom dosbin -> default dosbin", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{
 					Op:            OpDosbin,
@@ -1062,7 +1062,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 4)
 		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/opt/foo"}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDosbin, Source: "custom", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/opt/foo"}}, reduced.Body[1])
@@ -1071,7 +1071,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("custom insinto -> default doins", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{
 					Op:            OpDoins,
@@ -1085,7 +1085,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 4)
 		require.Equal(t, stateStmt{Family: StateFamilyIns, Value: "/etc/foo"}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDoins, Source: "custom.conf", RequiredState: StateRequirement{Family: StateFamilyIns, Value: "/etc/foo"}}, reduced.Body[1])
@@ -1094,7 +1094,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("custom docinto -> default dodoc", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{
 					Op:            OpDodoc,
@@ -1108,7 +1108,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 4)
 		require.Equal(t, stateStmt{Family: StateFamilyDoc, Value: "html"}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDodoc, Source: "manual.html", RequiredState: StateRequirement{Family: StateFamilyDoc, Value: "html"}}, reduced.Body[1])
@@ -1117,7 +1117,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("first doexe path must explicitly execute exeinto", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{
 					Op:            OpDoexe,
@@ -1126,14 +1126,14 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 2)
 		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: "/usr/bin"}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDoexe, Source: "prog", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/usr/bin"}}, reduced.Body[1])
 	})
 
 	t.Run("initial default doins does not emit insinto", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{
 					Op:            OpDoins,
@@ -1142,13 +1142,13 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 1)
 		require.Equal(t, actionStmt{Op: OpDoins, Source: "config.yaml", RequiredState: StateRequirement{Family: StateFamilyIns, Value: "/"}}, reduced.Body[0])
 	})
 
 	t.Run("branch divergence still restores insinto / where required", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				conditionStmt{
 					Expr: UseExpr{Flag: "custom"},
@@ -1167,7 +1167,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 3)
 		require.IsType(t, conditionStmt{}, reduced.Body[0])
 		require.Equal(t, stateStmt{Family: StateFamilyIns, Value: "/"}, reduced.Body[1])
@@ -1175,7 +1175,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("first no-argument exeinto retained", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{
 					Op:            OpDoexe,
@@ -1184,7 +1184,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 2)
 		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: ""}, reduced.Body[0])
 		require.Equal(t, "exeinto\n", reduced.Body[0].String(""))
@@ -1192,7 +1192,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("repeated identical no-argument exeinto deduplicated", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{
 					Op:            OpDoexe,
@@ -1206,7 +1206,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 3)
 		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: ""}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDoexe, Source: "foo", RequiredState: StateRequirement{Family: StateFamilyExe, Value: ""}}, reduced.Body[1])
@@ -1214,7 +1214,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("custom exeinto /opt/foo followed by required default emits exeinto", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{
 					Op:            OpDoexe,
@@ -1228,7 +1228,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 4)
 		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: "/opt/foo"}, reduced.Body[0])
 		require.Equal(t, actionStmt{Op: OpDoexe, Source: "foo", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/opt/foo"}}, reduced.Body[1])
@@ -1237,7 +1237,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("conditional custom exeinto followed by a default action restores/initializes it correctly", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				conditionStmt{
 					Expr: UseExpr{Flag: "custom"},
@@ -1256,7 +1256,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 3)
 		require.IsType(t, conditionStmt{}, reduced.Body[0])
 		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: ""}, reduced.Body[1])
@@ -1264,7 +1264,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("raw into /usr/local -> default dobin restores /usr", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				rawStmt{Content: "into /usr/local"},
 				actionStmt{
@@ -1274,7 +1274,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 3)
 		require.Equal(t, rawStmt{Content: "into /usr/local"}, reduced.Body[0])
 		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/usr"}, reduced.Body[1])
@@ -1282,7 +1282,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("raw into /usr/local -> default dosbin restores /usr", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				rawStmt{Content: "into /usr/local"},
 				actionStmt{
@@ -1292,7 +1292,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 3)
 		require.Equal(t, rawStmt{Content: "into /usr/local"}, reduced.Body[0])
 		require.Equal(t, stateStmt{Family: StateFamilyBin, Value: "/usr"}, reduced.Body[1])
@@ -1300,7 +1300,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("raw insinto /etc/foo -> default doins restores /", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				rawStmt{Content: "insinto /etc/foo"},
 				actionStmt{
@@ -1310,7 +1310,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 3)
 		require.Equal(t, rawStmt{Content: "insinto /etc/foo"}, reduced.Body[0])
 		require.Equal(t, stateStmt{Family: StateFamilyIns, Value: "/"}, reduced.Body[1])
@@ -1318,7 +1318,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("raw docinto html -> default dodoc resets docinto", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				rawStmt{Content: "docinto html"},
 				actionStmt{
@@ -1328,7 +1328,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 3)
 		require.Equal(t, rawStmt{Content: "docinto html"}, reduced.Body[0])
 		require.Equal(t, stateStmt{Family: StateFamilyDoc, Value: ""}, reduced.Body[1])
@@ -1336,7 +1336,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 	})
 
 	t.Run("raw exeinto /opt/foo -> subsequent required exe state is emitted", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				rawStmt{Content: "exeinto /opt/foo"},
 				actionStmt{
@@ -1346,7 +1346,7 @@ func TestStateResetAndRestoration(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 3)
 		require.Equal(t, rawStmt{Content: "exeinto /opt/foo"}, reduced.Body[0])
 		require.Equal(t, stateStmt{Family: StateFamilyExe, Value: "/opt/bin"}, reduced.Body[1])
@@ -1385,7 +1385,7 @@ func TestRawStatementRendering(t *testing.T) {
 }
 
 func TestInitialIndentationInput(t *testing.T) {
-	plan := &installPlan{
+	plan := &InstallProgram{
 		Body: []installStmt{
 			conditionStmt{
 				Expr: UseExpr{Flag: "foo"},
@@ -1410,7 +1410,7 @@ func TestFactoringPreservesStatementOrdering(t *testing.T) {
 	// Raw -> R
 	// Condition X -> B
 	// Must NOT factor A and B together across R!
-	plan := &installPlan{
+	plan := &InstallProgram{
 		Body: []installStmt{
 			conditionStmt{
 				Expr: UseExpr{Flag: "x"},
@@ -1427,7 +1427,7 @@ func TestFactoringPreservesStatementOrdering(t *testing.T) {
 			},
 		},
 	}
-	reduced := plan.reducePlan()
+	reduced := plan.Reduce()
 	require.Len(t, reduced.Body, 3)
 	require.IsType(t, conditionStmt{}, reduced.Body[0])
 	require.IsType(t, rawStmt{}, reduced.Body[1])
@@ -1436,7 +1436,7 @@ func TestFactoringPreservesStatementOrdering(t *testing.T) {
 
 func TestSiblingConditionMergingAndFactoring(t *testing.T) {
 	t.Run("exact sibling conditions merged", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				conditionStmt{
 					Expr: ArchExpr{Arch: "amd64"},
@@ -1452,7 +1452,7 @@ func TestSiblingConditionMergingAndFactoring(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 1)
 		cond := reduced.Body[0].(conditionStmt)
 		require.Equal(t, ArchExpr{Arch: "amd64"}, cond.Expr)
@@ -1460,7 +1460,7 @@ func TestSiblingConditionMergingAndFactoring(t *testing.T) {
 	})
 
 	t.Run("factoring common architecture with nested positive and negative USE", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				conditionStmt{
 					Expr: NewAndExpr(ArchExpr{Arch: "amd64"}, UseExpr{Flag: "extended"}),
@@ -1476,7 +1476,7 @@ func TestSiblingConditionMergingAndFactoring(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 1)
 		cond := reduced.Body[0].(conditionStmt)
 		require.Equal(t, ArchExpr{Arch: "amd64"}, cond.Expr)
@@ -1486,7 +1486,7 @@ func TestSiblingConditionMergingAndFactoring(t *testing.T) {
 	})
 
 	t.Run("multi-level recursive factoring", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				conditionStmt{
 					Expr: NewAndExpr(ArchExpr{Arch: "amd64"}, UseExpr{Flag: "gui"}, UseExpr{Flag: "opengl"}),
@@ -1498,7 +1498,7 @@ func TestSiblingConditionMergingAndFactoring(t *testing.T) {
 				},
 			},
 		}
-		reduced := plan.reducePlan()
+		reduced := plan.Reduce()
 		require.Len(t, reduced.Body, 1)
 		outer := reduced.Body[0].(conditionStmt)
 		require.Equal(t, ArchExpr{Arch: "amd64"}, outer.Expr)
@@ -1511,7 +1511,7 @@ func TestSiblingConditionMergingAndFactoring(t *testing.T) {
 
 func TestReducerIdempotenceAndConvergence(t *testing.T) {
 	t.Run("canonical reduction idempotence", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			UniverseArchitectures: []string{"amd64", "arm64", "riscv64"},
 			Body: []installStmt{
 				stateStmt{Family: StateFamilyExe, Value: "/usr/bin"},
@@ -1530,15 +1530,15 @@ func TestReducerIdempotenceAndConvergence(t *testing.T) {
 			},
 		}
 
-		once := plan.reducePlan()
-		twice := once.reducePlan()
+		once := plan.Reduce()
+		twice := once.Reduce()
 
 		require.True(t, planEqual(once, twice))
 		require.Equal(t, once, twice)
 	})
 
 	t.Run("deeply nested structure idempotence", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			UniverseArchitectures: []string{"amd64", "arm64", "riscv64"},
 			Body: []installStmt{
 				stateStmt{Family: StateFamilyExe, Value: "/opt/bin"},
@@ -1583,9 +1583,9 @@ func TestReducerIdempotenceAndConvergence(t *testing.T) {
 			},
 		}
 
-		once := plan.reducePlan()
-		twice := once.reducePlan()
-		thrice := twice.reducePlan()
+		once := plan.Reduce()
+		twice := once.Reduce()
+		thrice := twice.Reduce()
 
 		require.True(t, planEqual(once, twice))
 		require.True(t, planEqual(twice, thrice))
@@ -1794,7 +1794,7 @@ func TestDecomposeDestination(t *testing.T) {
 
 func TestRecursiveValidation(t *testing.T) {
 	t.Run("valid plan", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				stateStmt{Family: StateFamilyExe, Value: "/usr/bin"},
 				actionStmt{Op: OpDoexe, Source: "app", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/usr/bin"}},
@@ -1806,7 +1806,7 @@ func TestRecursiveValidation(t *testing.T) {
 	})
 
 	t.Run("invalid condition without expr", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				conditionStmt{
 					Expr: nil,
@@ -1818,7 +1818,7 @@ func TestRecursiveValidation(t *testing.T) {
 	})
 
 	t.Run("invalid dosym without destination", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{Op: OpDosym, Source: "app", RequiredState: StateRequirement{Family: StateFamilyNone}},
 			},
@@ -1827,7 +1827,7 @@ func TestRecursiveValidation(t *testing.T) {
 	})
 
 	t.Run("invalid rename without destination", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{Op: OpNewexe, Source: "app", RequiredState: StateRequirement{Family: StateFamilyExe}},
 			},
@@ -1836,7 +1836,7 @@ func TestRecursiveValidation(t *testing.T) {
 	})
 
 	t.Run("invalid state without family", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				stateStmt{Family: "", Value: "/usr/bin"},
 			},
@@ -1845,35 +1845,35 @@ func TestRecursiveValidation(t *testing.T) {
 	})
 
 	t.Run("invalid state family for state-dependent operation", func(t *testing.T) {
-		plan := &installPlan{
+		plan := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{Op: OpDoexe, Source: "app", RequiredState: StateRequirement{Family: StateFamilyNone}},
 			},
 		}
 		require.EqualError(t, plan.Validate(), "doexe requires state family exeinto, got ")
 
-		plan2 := &installPlan{
+		plan2 := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{Op: OpDoexe, Source: "app", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr"}},
 			},
 		}
 		require.EqualError(t, plan2.Validate(), "doexe requires state family exeinto, got into")
 
-		plan3 := &installPlan{
+		plan3 := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{Op: OpDoins, Source: "cfg", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr"}},
 			},
 		}
 		require.EqualError(t, plan3.Validate(), "doins requires state family insinto, got into")
 
-		plan4 := &installPlan{
+		plan4 := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{Op: OpDobin, Source: "app", RequiredState: StateRequirement{Family: StateFamilyNone}},
 			},
 		}
 		require.EqualError(t, plan4.Validate(), "dobin requires state family into, got ")
 
-		plan5 := &installPlan{
+		plan5 := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{Op: OpDodoc, Source: "doc", RequiredState: StateRequirement{Family: StateFamilyNone}},
 			},
@@ -1882,21 +1882,21 @@ func TestRecursiveValidation(t *testing.T) {
 	})
 
 	t.Run("invalid state family on stateless operation", func(t *testing.T) {
-		plan1 := &installPlan{
+		plan1 := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{Op: OpDodir, Source: "/var/lib", RequiredState: StateRequirement{Family: StateFamilyBin, Value: "/usr"}},
 			},
 		}
 		require.EqualError(t, plan1.Validate(), "dodir does not use destination state, got family into")
 
-		plan2 := &installPlan{
+		plan2 := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{Op: OpDosym, Source: "a", Target: "b", RequiredState: StateRequirement{Family: StateFamilyExe, Value: "/opt/bin"}},
 			},
 		}
 		require.EqualError(t, plan2.Validate(), "dosym does not use destination state, got family exeinto")
 
-		plan3 := &installPlan{
+		plan3 := &InstallProgram{
 			Body: []installStmt{
 				actionStmt{Op: OpDoman, Source: "app.1", RequiredState: StateRequirement{Family: StateFamilyDoc, Value: "man"}},
 			},
@@ -1905,7 +1905,7 @@ func TestRecursiveValidation(t *testing.T) {
 	})
 
 	t.Run("nil plan validate is nil", func(t *testing.T) {
-		var plan *installPlan
+		var plan *InstallProgram
 		require.NoError(t, plan.Validate())
 	})
 }

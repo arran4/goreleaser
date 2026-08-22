@@ -2,182 +2,324 @@ package gentoo
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"crypto/sha512"
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"hash"
 	"io"
-	"os"
-	"path"
-	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
-	"golang.org/x/crypto/blake2b"
-
-	"github.com/goreleaser/goreleaser/v2/internal/artifact"
-	"github.com/goreleaser/goreleaser/v2/internal/client"
 	"github.com/goreleaser/goreleaser/v2/pkg/config"
-	"github.com/goreleaser/goreleaser/v2/pkg/context"
 )
 
-type gentooInnerNode struct {
-	XMLName xml.Name
-	Content string            `xml:",chardata"`
-	Attrs   []xml.Attr        `xml:",any,attr"`
-	Nodes   []gentooInnerNode `xml:",any"`
+type metadataNodeKind uint8
+
+const (
+	metadataElementNode metadataNodeKind = iota
+	metadataTextNode
+	metadataCommentNode
+)
+
+type metadataNode struct {
+	kind     metadataNodeKind
+	name     xml.Name
+	attrs    []xml.Attr
+	text     string
+	children []*metadataNode
 }
 
-type gentooMaintainer struct {
-	Type  string `xml:"type,attr,omitempty"`
-	Email string `xml:"email"`
-	Name  string `xml:"name,omitempty"`
+// Metadata is an ordered XML tree. Managed maintainer, USE, and upstream
+// fields are updated in place, while unknown elements, attributes, child
+// content, comments, and sibling ordering remain intact.
+type Metadata struct {
+	root *metadataNode
 }
 
-type gentooUpstream struct {
-	BugsTo string            `xml:"bugs-to,omitempty"`
-	Doc    string            `xml:"doc,omitempty"`
-	Attrs  []xml.Attr        `xml:",any,attr"`
-	Nodes  []gentooInnerNode `xml:",any"`
+func NewMetadata() *Metadata {
+	return &Metadata{root: &metadataNode{kind: metadataElementNode, name: xml.Name{Local: "pkgmetadata"}}}
 }
 
-type gentooUseFlag struct {
-	XMLName xml.Name   `xml:"flag"`
-	Name    string     `xml:"name,attr"`
-	Value   string     `xml:",chardata"`
-	Attrs   []xml.Attr `xml:",any,attr"`
+func ParseMetadata(content []byte) (*Metadata, error) {
+	decoder := xml.NewDecoder(bytes.NewReader(content))
+	for {
+		token, err := decoder.Token()
+		if errors.Is(err, io.EOF) {
+			return nil, errors.New("metadata.xml has no root element")
+		}
+		if err != nil {
+			return nil, err
+		}
+		start, ok := token.(xml.StartElement)
+		if !ok {
+			continue
+		}
+		if start.Name.Local != "pkgmetadata" {
+			return nil, fmt.Errorf("metadata.xml root must be pkgmetadata, got %s", start.Name.Local)
+		}
+		root, err := parseMetadataElement(decoder, start)
+		if err != nil {
+			return nil, err
+		}
+		return &Metadata{root: root}, nil
+	}
 }
 
-type gentooUse struct {
-	XMLName xml.Name          `xml:"use"`
-	Flags   []gentooUseFlag   `xml:"flag"`
-	Attrs   []xml.Attr        `xml:",any,attr"`
-	Nodes   []gentooInnerNode `xml:",any"`
+func parseMetadataElement(decoder *xml.Decoder, start xml.StartElement) (*metadataNode, error) {
+	node := &metadataNode{kind: metadataElementNode, name: start.Name, attrs: slices.Clone(start.Attr)}
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		switch value := token.(type) {
+		case xml.StartElement:
+			child, err := parseMetadataElement(decoder, value)
+			if err != nil {
+				return nil, err
+			}
+			node.children = append(node.children, child)
+		case xml.CharData:
+			if strings.TrimSpace(string(value)) != "" {
+				node.children = append(node.children, &metadataNode{kind: metadataTextNode, text: string(value)})
+			}
+		case xml.Comment:
+			node.children = append(node.children, &metadataNode{kind: metadataCommentNode, text: string(value)})
+		case xml.EndElement:
+			return node, nil
+		}
+	}
 }
 
-type gentooMetadata struct {
-	XMLName     xml.Name           `xml:"pkgmetadata"`
-	Attrs       []xml.Attr         `xml:",any,attr"`
-	Maintainers []gentooMaintainer `xml:"maintainer"`
-	Use         *gentooUse         `xml:"use,omitempty"`
-	Upstream    *gentooUpstream    `xml:"upstream,omitempty"`
-	InnerNodes  []gentooInnerNode  `xml:",any"`
-}
-
-func (m *gentooMetadata) AddMaintainers(maintainers []config.GentooMaintainer) error {
-	for _, main := range maintainers {
-		if main.Email == "" {
+func (m *Metadata) AddMaintainers(maintainers []config.GentooMaintainer) error {
+	m.ensureRoot()
+	for _, maintainer := range maintainers {
+		if maintainer.Email == "" {
 			return errors.New("maintainer email is required")
 		}
-		exists := false
-		for _, em := range m.Maintainers {
-			if em.Email == main.Email {
-				exists = true
-				break
-			}
+		node := m.maintainer(maintainer.Email)
+		if node == nil {
+			node = newMetadataElement("maintainer", xml.Attr{Name: xml.Name{Local: "type"}, Value: "person"})
+			node.children = append(node.children, metadataTextElement("email", maintainer.Email))
+			m.root.children = append(m.root.children, node)
 		}
-		if !exists {
-			m.Maintainers = append(m.Maintainers, gentooMaintainer{
-				Type:  "person",
-				Email: main.Email,
-				Name:  main.Name,
-			})
+		if maintainer.Name != "" {
+			node.setChildText("name", maintainer.Name)
 		}
 	}
 	return nil
 }
 
-func (m *gentooMetadata) AddUseFlags(flags []config.GentooUseFlag) {
+func (m *Metadata) maintainer(email string) *metadataNode {
+	m.ensureRoot()
+	for _, node := range m.root.elements("maintainer") {
+		if node.childText("email") == email {
+			return node
+		}
+	}
+	return nil
+}
+
+func (m *Metadata) MaintainerEmails() []string {
+	m.ensureRoot()
+	var result []string
+	for _, node := range m.root.elements("maintainer") {
+		if email := node.childText("email"); email != "" {
+			result = append(result, email)
+		}
+	}
+	return result
+}
+
+func (m *Metadata) AddUseFlags(flags []config.GentooUseFlag) {
+	m.ensureRoot()
 	if len(flags) == 0 {
 		return
 	}
-	if m.Use == nil {
-		m.Use = &gentooUse{}
+	use := m.root.firstElement("use")
+	if use == nil {
+		use = newMetadataElement("use")
+		m.root.children = append(m.root.children, use)
 	}
-	configuredFlags := make(map[string]string)
+	configured := map[string]string{}
 	for _, flag := range flags {
 		if flag.Description != "" {
-			configuredFlags[strings.TrimLeft(flag.Flag, "+-")] = flag.Description
+			configured[strings.TrimLeft(flag.Flag, "+-")] = flag.Description
 		}
 	}
-
-	var configuredFlagNames []string
-	for k := range configuredFlags {
-		configuredFlagNames = append(configuredFlagNames, k)
+	names := make([]string, 0, len(configured))
+	for name := range configured {
+		names = append(names, name)
 	}
-	slices.Sort(configuredFlagNames)
-
-	for _, k := range configuredFlagNames {
-		v := configuredFlags[k]
-		exists := false
-		for i, ef := range m.Use.Flags {
-			if ef.Name == k {
-				m.Use.Flags[i].Value = v
-				exists = true
-				break
-			}
+	slices.Sort(names)
+	for _, name := range names {
+		flag := use.elementByAttr("flag", "name", name)
+		if flag == nil {
+			flag = newMetadataElement("flag", xml.Attr{Name: xml.Name{Local: "name"}, Value: name})
+			use.children = append(use.children, flag)
 		}
-		if !exists {
-			m.Use.Flags = append(m.Use.Flags, gentooUseFlag{
-				Name:  k,
-				Value: v,
-			})
-		}
+		flag.setText(configured[name])
 	}
 }
 
-func (m *gentooMetadata) SetUpstream(bugsTo string) {
+func (m *Metadata) SetUpstream(bugsTo string) {
+	m.ensureRoot()
 	if bugsTo == "" {
 		return
 	}
-	if m.Upstream == nil {
-		m.Upstream = &gentooUpstream{}
+	upstream := m.root.firstElement("upstream")
+	if upstream == nil {
+		upstream = newMetadataElement("upstream")
+		m.root.children = append(m.root.children, upstream)
 	}
-	m.Upstream.BugsTo = bugsTo
+	upstream.setChildText("bugs-to", bugsTo)
 }
 
-func (m *gentooMetadata) Marshal() ([]byte, error) {
-	content, err := xml.MarshalIndent(m, "", "\t")
-	if err != nil {
+func (m *Metadata) Render() ([]byte, error) {
+	if m == nil || m.root == nil {
+		m = NewMetadata()
+	}
+	var body bytes.Buffer
+	encoder := xml.NewEncoder(&body)
+	encoder.Indent("", "\t")
+	if err := encodeMetadataNode(encoder, m.root); err != nil {
+		return nil, err
+	}
+	if err := encoder.Flush(); err != nil {
 		return nil, err
 	}
 	header := []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE pkgmetadata SYSTEM \"https://www.gentoo.org/dtd/metadata.dtd\">\n")
-	return append(header, append(content, '\n')...), nil
+	return append(header, append(body.Bytes(), '\n')...), nil
 }
 
-type overlaySettings struct {
+func (m *Metadata) Marshal() ([]byte, error) { return m.Render() }
+
+func (m *Metadata) ensureRoot() {
+	if m.root == nil {
+		m.root = NewMetadata().root
+	}
+}
+
+func encodeMetadataNode(encoder *xml.Encoder, node *metadataNode) error {
+	switch node.kind {
+	case metadataTextNode:
+		return encoder.EncodeToken(xml.CharData(node.text))
+	case metadataCommentNode:
+		return encoder.EncodeToken(xml.Comment(node.text))
+	}
+	start := xml.StartElement{Name: node.name, Attr: slices.Clone(node.attrs)}
+	if err := encoder.EncodeToken(start); err != nil {
+		return err
+	}
+	for _, child := range node.children {
+		if err := encodeMetadataNode(encoder, child); err != nil {
+			return err
+		}
+	}
+	return encoder.EncodeToken(start.End())
+}
+
+func newMetadataElement(name string, attrs ...xml.Attr) *metadataNode {
+	return &metadataNode{kind: metadataElementNode, name: xml.Name{Local: name}, attrs: slices.Clone(attrs)}
+}
+
+func metadataTextElement(name, value string) *metadataNode {
+	node := newMetadataElement(name)
+	node.setText(value)
+	return node
+}
+
+func (n *metadataNode) elements(name string) []*metadataNode {
+	var result []*metadataNode
+	for _, child := range n.children {
+		if child.kind == metadataElementNode && child.name.Local == name {
+			result = append(result, child)
+		}
+	}
+	return result
+}
+
+func (n *metadataNode) firstElement(name string) *metadataNode {
+	elements := n.elements(name)
+	if len(elements) == 0 {
+		return nil
+	}
+	return elements[0]
+}
+
+func (n *metadataNode) elementByAttr(element, attr, value string) *metadataNode {
+	for _, child := range n.elements(element) {
+		for _, candidate := range child.attrs {
+			if candidate.Name.Local == attr && candidate.Value == value {
+				return child
+			}
+		}
+	}
+	return nil
+}
+
+func (n *metadataNode) childText(name string) string {
+	child := n.firstElement(name)
+	if child == nil {
+		return ""
+	}
+	return child.textContent()
+}
+
+func (n *metadataNode) textContent() string {
+	var result strings.Builder
+	for _, child := range n.children {
+		if child.kind == metadataTextNode {
+			result.WriteString(child.text)
+		}
+	}
+	return strings.TrimSpace(result.String())
+}
+
+func (n *metadataNode) setChildText(name, value string) {
+	child := n.firstElement(name)
+	if child == nil {
+		child = newMetadataElement(name)
+		n.children = append(n.children, child)
+	}
+	child.setText(value)
+}
+
+func (n *metadataNode) setText(value string) {
+	result := n.children[:0]
+	inserted := false
+	for _, child := range n.children {
+		if child.kind != metadataTextNode {
+			result = append(result, child)
+			continue
+		}
+		if !inserted {
+			result = append(result, &metadataNode{kind: metadataTextNode, text: value})
+			inserted = true
+		}
+	}
+	if !inserted {
+		result = append([]*metadataNode{{kind: metadataTextNode, text: value}}, result...)
+	}
+	n.children = result
+}
+
+// Layout is the effective overlay layout.conf policy after explicit config
+// overrides are applied.
+type Layout struct {
 	hashes                    []string
 	thin                      bool
 	cacheFormats              []string
 	hasCacheFormatsConfigured bool
 }
 
-func loadOverlaySettings(ctx *context.Context, cfg config.Gentoo, repoClient any, repo client.Repo) (overlaySettings, error) {
-	settings := overlaySettings{
-		hashes: []string{"BLAKE2B", "SHA512"},
-		thin:   false,
-	}
-	if len(cfg.ManifestHashes) > 0 {
-		settings.hashes = cfg.ManifestHashes
-	}
-	if cfg.ThinManifests != nil {
-		settings.thin = *cfg.ThinManifests
-	}
+func (l Layout) ManifestHashes() []string { return slices.Clone(l.hashes) }
+func (l Layout) ThinManifests() bool      { return l.thin }
+func (l Layout) SupportsMetaCache() bool {
+	return !l.hasCacheFormatsConfigured || slices.Contains(l.cacheFormats, "md5-dict") || slices.Contains(l.cacheFormats, "md5-cache")
+}
 
-	dl, ok := repoClient.(client.FileDownloader)
-	if !ok {
-		return settings, nil
-	}
-	content, err := dl.DownloadFile(ctx, repo, path.Join(cfg.OverlayPath, "metadata/layout.conf"))
-	if errors.Is(err, client.ErrNotFound) || errors.Is(err, client.ErrNotImplemented) {
-		return settings, nil
-	}
-	if err != nil {
-		return settings, fmt.Errorf("failed to download layout.conf: %w", err)
-	}
+func ParseLayout(content []byte) Layout {
+	settings := Layout{hashes: []string{"BLAKE2B", "SHA512"}}
 	for lineB := range bytes.SplitSeq(content, []byte{'\n'}) {
 		key, value, ok := strings.Cut(strings.TrimSpace(string(lineB)), "=")
 		if !ok {
@@ -185,323 +327,40 @@ func loadOverlaySettings(ctx *context.Context, cfg config.Gentoo, repoClient any
 		}
 		switch strings.TrimSpace(key) {
 		case "manifest-hashes":
-			if len(cfg.ManifestHashes) == 0 {
-				settings.hashes = strings.Fields(value)
-			}
+			settings.hashes = strings.Fields(value)
 		case "thin-manifests":
-			if cfg.ThinManifests == nil {
-				settings.thin = strings.TrimSpace(value) == "true"
-			}
+			settings.thin = strings.TrimSpace(value) == "true"
 		case "cache-formats":
 			settings.hasCacheFormatsConfigured = true
 			settings.cacheFormats = strings.Fields(value)
 		}
 	}
-	return settings, nil
+	return settings
 }
 
-func generateManifestLine(recordType, filename, pathStr string, content []byte, manifestHashes []string) (string, error) {
-	var r io.Reader
-	var size int64
-
-	if content == nil && pathStr != "" {
-		info, err := os.Stat(pathStr)
-		if err != nil {
-			return "", err
-		}
-		size = info.Size()
-
-		f, err := os.Open(pathStr)
-		if err != nil {
-			return "", err
-		}
-		defer f.Close()
-		r = f
-	} else {
-		size = int64(len(content))
-		r = bytes.NewReader(content)
+func (l Layout) WithConfig(cfg manifestConfig) Layout {
+	if len(cfg.hashes) > 0 {
+		l.hashes = slices.Clone(cfg.hashes)
 	}
-
-	var writers []io.Writer
-	var b2b hash.Hash
-	var s512 hash.Hash
-	var s256 hash.Hash
-
-	for _, algo := range manifestHashes {
-		algo = strings.ToUpper(algo)
-		switch algo {
-		case "BLAKE2B":
-			b2b, _ = blake2b.New512(nil)
-			writers = append(writers, b2b)
-		case "SHA512":
-			s512 = sha512.New()
-			writers = append(writers, s512)
-		case "SHA256":
-			s256 = sha256.New()
-			writers = append(writers, s256)
-		default:
-			return "", fmt.Errorf("unsupported manifest hash algorithm: %s", algo)
-		}
+	if cfg.thin != nil {
+		l.thin = *cfg.thin
 	}
-
-	if len(writers) > 0 {
-		if _, err := io.Copy(io.MultiWriter(writers...), r); err != nil {
-			return "", err
-		}
-	}
-
-	line := fmt.Sprintf("%s %s %d", recordType, filename, size)
-	for _, algo := range manifestHashes {
-		algo = strings.ToUpper(algo)
-		switch algo {
-		case "BLAKE2B":
-			if b2b != nil {
-				line = fmt.Sprintf("%s BLAKE2B %x", line, b2b.Sum(nil))
-			}
-		case "SHA512":
-			if s512 != nil {
-				line = fmt.Sprintf("%s SHA512 %x", line, s512.Sum(nil))
-			}
-		case "SHA256":
-			if s256 != nil {
-				line = fmt.Sprintf("%s SHA256 %x", line, s256.Sum(nil))
-			}
-		}
-	}
-
-	return line, nil
+	return l
 }
 
-func handleGentooManifestAndMetadata(ctx *context.Context, cfg config.Gentoo, repoClient any, repo client.Repo, files *[]client.RepoFile, deletedEbuilds []string) error {
-	dir := packageDir(cfg)
-
-	metadataPath := path.Join(dir, "metadata.xml")
-	manifestPath := path.Join(dir, "Manifest")
-
-	if len(cfg.Maintainers) > 0 || cfg.BugsTo != "" || len(cfg.UseFlags) > 0 {
-		meta := gentooMetadata{}
-		if dl, ok := repoClient.(client.FileDownloader); ok {
-			content, err := dl.DownloadFile(ctx, repo, metadataPath)
-			if err == nil {
-				if err := xml.Unmarshal(content, &meta); err != nil {
-					return fmt.Errorf("failed to parse metadata.xml: %w", err)
-				}
-			} else if !errors.Is(err, client.ErrNotFound) && !errors.Is(err, client.ErrNotImplemented) {
-				return fmt.Errorf("failed to download metadata.xml: %w", err)
-			}
-		}
-
-		meta.AddUseFlags(cfg.UseFlags)
-		if err := meta.AddMaintainers(cfg.Maintainers); err != nil {
-			return err
-		}
-		meta.SetUpstream(cfg.BugsTo)
-
-		content, err := meta.Marshal()
-		if err != nil {
-			return err
-		}
-		*files = append(*files, client.RepoFile{
-			Content: content,
-			Path:    metadataPath,
-		})
+func prepareMetadata(state *Metadata, cfg metadataConfig, changes *ChangeSet, path string) error {
+	if len(cfg.maintainers) == 0 && len(cfg.useFlags) == 0 && cfg.bugsTo == "" {
+		return nil
 	}
-
-	settings, err := loadOverlaySettings(ctx, cfg, repoClient, repo)
+	state.AddUseFlags(cfg.useFlags)
+	if err := state.AddMaintainers(cfg.maintainers); err != nil {
+		return err
+	}
+	state.SetUpstream(cfg.bugsTo)
+	content, err := state.Render()
 	if err != nil {
 		return err
 	}
-	manifestHashes, thinManifests := settings.hashes, settings.thin
-	manifestLines, err := loadManifestLines(ctx, repoClient, repo, manifestPath)
-	if err != nil {
-		return err
-	}
-
-	prefix := filepath.Base(dir) + "-"
-
-	retainedBaseVersions := make(map[string]bool)
-	for _, f := range *files {
-		if f.Delete || !strings.HasSuffix(f.Path, ".ebuild") || !isInsidePackageDir(f.Path, dir) {
-			continue
-		}
-
-		filename := filepath.Base(f.Path)
-		if v, ok := strings.CutPrefix(filename, prefix); ok {
-			v = strings.TrimSuffix(v, ".ebuild")
-			if idx := strings.LastIndex(v, "-r"); idx != -1 {
-				if _, err := strconv.Atoi(v[idx+2:]); err == nil {
-					v = v[:idx]
-				}
-			}
-			retainedBaseVersions[v] = true
-		}
-	}
-
-	var deletedVersions []string
-	var deletedBaseVersions []string
-	for _, e := range deletedEbuilds {
-		v, _ := strings.CutPrefix(e, prefix)
-		v = strings.TrimSuffix(v, ".ebuild")
-		deletedVersions = append(deletedVersions, v)
-
-		baseV := v
-		if idx := strings.LastIndex(v, "-r"); idx != -1 {
-			if _, err := strconv.Atoi(v[idx+2:]); err == nil {
-				baseV = v[:idx]
-			}
-		}
-		if !retainedBaseVersions[baseV] {
-			deletedBaseVersions = append(deletedBaseVersions, baseV)
-		}
-	}
-
-	newManifestFiles := map[string]struct{}{}
-	if !thinManifests {
-		for _, f := range *files {
-			if !f.Delete && isInsidePackageDir(f.Path, dir) {
-				recordType, filename := manifestFileInfo(f.Path, dir)
-				newManifestFiles[recordType+":"+filename] = struct{}{}
-			}
-		}
-	}
-	filters := []artifact.Filter{
-		artifact.ByGoos("linux"),
-		artifact.ByType(artifact.UploadableArchive),
-		artifact.OnlyReplacingUnibins,
-	}
-	if len(cfg.IDs) > 0 {
-		filters = append(filters, artifact.ByIDs(cfg.IDs...))
-	}
-	arches := ctx.Artifacts.Filter(artifact.And(filters...)).List()
-	currentDists := make(map[string]struct{}, len(arches))
-	for _, art := range arches {
-		currentDists[art.Name] = struct{}{}
-	}
-
-	var newManifestLines []string
-	for _, line := range manifestLines {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			newManifestLines = append(newManifestLines, line)
-			continue
-		}
-
-		recordType := fields[0]
-		filename := fields[1]
-
-		switch recordType {
-		case "DIST":
-			_, removed := currentDists[filename]
-			for _, dv := range deletedBaseVersions {
-				if idx := strings.Index(filename, dv); idx != -1 {
-					isMatch := true
-					if idx > 0 && filename[idx-1] != '_' && filename[idx-1] != '-' {
-						isMatch = false
-					}
-					endIdx := idx + len(dv)
-					if endIdx < len(filename) {
-						next := filename[endIdx]
-						if next == '.' {
-							if endIdx+1 < len(filename) && filename[endIdx+1] >= '0' && filename[endIdx+1] <= '9' {
-								isMatch = false
-							}
-						} else if next != '_' && next != '-' {
-							isMatch = false
-						}
-					}
-					if isMatch {
-						removed = true
-						break
-					}
-				}
-			}
-			if !removed {
-				newManifestLines = append(newManifestLines, line)
-			}
-		case "EBUILD", "AUX", "MISC":
-			if thinManifests {
-				continue
-			}
-			removed := false
-			for _, dv := range deletedVersions {
-				if recordType == "EBUILD" && filename == filepath.Base(dir)+"-"+dv+".ebuild" {
-					removed = true
-					break
-				}
-			}
-			if !removed {
-				_, removed = newManifestFiles[recordType+":"+filename]
-			}
-			if !removed {
-				newManifestLines = append(newManifestLines, line)
-			}
-		default:
-			newManifestLines = append(newManifestLines, line)
-		}
-	}
-
-	for _, art := range arches {
-		line, err := generateManifestLine("DIST", art.Name, art.Path, nil, manifestHashes)
-		if err != nil {
-			return err
-		}
-		newManifestLines = append(newManifestLines, line)
-	}
-
-	if !thinManifests {
-		for _, f := range *files {
-			if f.Delete || !isInsidePackageDir(f.Path, dir) {
-				continue
-			}
-
-			recordType, filename := manifestFileInfo(f.Path, dir)
-
-			line, err := generateManifestLine(recordType, filename, f.Path, f.Content, manifestHashes)
-			if err != nil {
-				return err
-			}
-			newManifestLines = append(newManifestLines, line)
-		}
-	}
-
-	if len(newManifestLines) > 0 {
-		slices.Sort(newManifestLines)
-		newManifestLines = slices.Compact(newManifestLines)
-		*files = append(*files, client.RepoFile{
-			Content: []byte(strings.Join(newManifestLines, "\n") + "\n"),
-			Path:    manifestPath,
-		})
-	}
+	changes.Write(path, content)
 	return nil
-}
-
-func loadManifestLines(ctx *context.Context, repoClient any, repo client.Repo, manifestPath string) ([]string, error) {
-	if dl, ok := repoClient.(client.FileDownloader); ok {
-		content, err := dl.DownloadFile(ctx, repo, manifestPath)
-		if err == nil {
-			return strings.FieldsFunc(string(content), func(r rune) bool { return r == '\n' || r == '\r' }), nil
-		}
-		if !errors.Is(err, client.ErrNotFound) && !errors.Is(err, client.ErrNotImplemented) {
-			return nil, fmt.Errorf("failed to download Manifest: %w", err)
-		}
-	}
-	return nil, nil
-}
-
-func manifestFileInfo(filePath, packageDir string) (string, string) {
-	pathStr := filepath.ToSlash(filePath)
-	filesDir := path.Join(packageDir, "files")
-	if pathStr == filesDir || strings.HasPrefix(pathStr, filesDir+"/") {
-		return "AUX", strings.TrimPrefix(pathStr, filesDir+"/")
-	}
-	if strings.HasSuffix(pathStr, ".ebuild") {
-		return "EBUILD", path.Base(pathStr)
-	}
-	return "MISC", path.Base(pathStr)
-}
-
-func isInsidePackageDir(filePath, packageDir string) bool {
-	p := filepath.ToSlash(filePath)
-	d := filepath.ToSlash(packageDir)
-	return p == d || strings.HasPrefix(p, d+"/")
 }

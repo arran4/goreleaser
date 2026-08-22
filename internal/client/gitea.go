@@ -50,7 +50,7 @@ func (c *giteaClient) ListDir(ctx *context.Context, repo Repo, dir string) ([]st
 	}
 	var names []string
 	for _, item := range contents {
-		if item != nil && item.Type == "file" {
+		if item != nil && isFileOrDirectory(item.Type) {
 			names = append(names, item.Name)
 		}
 	}
