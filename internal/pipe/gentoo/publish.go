@@ -92,12 +92,17 @@ func NewPublisher(ctx *context.Context, cfg *GentooConfig, files []GeneratedFile
 	}
 	target := NewRepository(provider, cfg.TargetRepository())
 	var stateProvider any = provider
-	if publication.repository.Git.URL != "" {
+	stateRepo := cfg.StateRepository()
+	if publication.repository.Git.URL != "" && sameRepository(target.Repo(), stateRepo) {
 		gitClient := client.NewGitUploadClient(cfg.StateRepository().Branch)
 		stateProvider = gitClient
 	}
-	state := NewRepositoryState(NewRepository(stateProvider, cfg.StateRepository()), cfg)
+	state := NewRepositoryState(NewRepository(stateProvider, stateRepo), cfg)
 	return &Publisher{cfg: cfg, files: files, target: target, state: state, author: author, message: message, base: base, config: publication}, nil
+}
+
+func sameRepository(a, b client.Repo) bool {
+	return a.Owner == b.Owner && a.Name == b.Name
 }
 
 func (p *Publisher) Publish(ctx *context.Context) error {

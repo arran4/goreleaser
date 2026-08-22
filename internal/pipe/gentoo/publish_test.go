@@ -19,6 +19,8 @@ import (
 type recordingRepositoryClient struct {
 	*client.Mock
 	reads []client.Repo
+	base  client.Repo
+	head  client.Repo
 }
 
 func (c *recordingRepositoryClient) ListDir(ctx *context.Context, repo client.Repo, dir string) ([]string, error) {
@@ -29,6 +31,13 @@ func (c *recordingRepositoryClient) ListDir(ctx *context.Context, repo client.Re
 func (c *recordingRepositoryClient) DownloadFile(ctx *context.Context, repo client.Repo, name string) ([]byte, error) {
 	c.reads = append(c.reads, repo)
 	return c.Mock.DownloadFile(ctx, repo, name)
+}
+
+func (c *recordingRepositoryClient) OpenPullRequest(_ *context.Context, base, head client.Repo, _ string, _ bool) error {
+	c.OpenedPullRequest = true
+	c.base = base
+	c.head = head
+	return nil
 }
 
 func TestPublisherAllStateReadsUseCrossRepositoryPRBase(t *testing.T) {
@@ -220,6 +229,108 @@ func TestPublisherPrepareGitRepositoryReadsRemoteStateOnFirstUse(t *testing.T) {
 	require.True(t, ok)
 	require.NotContains(t, string(manifest.Content), "foo-1.0.tar.gz", "the existing remote Manifest must participate in planning")
 	require.Contains(t, string(manifest.Content), "foo-2.0.tar.gz")
+}
+
+func TestPublisherPrepareSameRepositoryPRReadsBaseBranchFromGit(t *testing.T) {
+	remote, privateKey := gentooGitStateRepository(t, map[string][]byte{
+		"metadata/layout.conf":                []byte("thin-manifests = true\n"),
+		"app-misc/foo-bin/foo-bin-1.0.ebuild": []byte("EAPI=8\n"),
+	})
+	directory := t.TempDir()
+	ebuildPath := filepath.Join(directory, "foo-bin-2.0.ebuild")
+	require.NoError(t, os.WriteFile(ebuildPath, []byte("EAPI=8\n"), 0o644))
+
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{Dist: t.TempDir()}, testctx.WithVersion("2.0"))
+	cfg := &GentooConfig{raw: config.Gentoo{
+		ID: "default", Name: "foo", Category: "app-misc", Type: "bin",
+		ConflictResolution: config.ConflictResolutionOverwrite,
+		KeepVersions:       1, VersionRetentionStrategy: config.VersionRetentionStrategyKeepLatest,
+		CommitAuthor: config.CommitAuthor{Name: "Test", Email: "test@example.com"}, CommitMessageTemplate: "publish",
+		Repository: config.RepoRef{
+			Owner: "owner", Name: "overlay", Branch: "release", Git: config.GitRepoRef{URL: remote, PrivateKey: privateKey},
+			PullRequest: config.PullRequest{Enabled: true, Base: config.PullRequestBase{Owner: "owner", Name: "overlay", Branch: "main"}},
+		},
+	}, version: "2.0"}
+	provider := &recordingRepositoryClient{Mock: client.NewMock()}
+	publisher, err := NewPublisher(ctx, cfg, []GeneratedFile{{ConfigID: cfg.ID(), RepoPath: cfg.EbuildPath(), Kind: GeneratedEbuild, Path: ebuildPath}}, provider)
+	require.NoError(t, err)
+
+	changes, err := publisher.Prepare(ctx)
+	require.NoError(t, err)
+	require.Empty(t, provider.reads, "same-repository state should be read through git")
+	require.DirExists(t, filepath.Join(ctx.Config.Dist, "git", "overlay-main"))
+	deleted, ok := changes.Find("app-misc/foo-bin/foo-bin-1.0.ebuild")
+	require.True(t, ok)
+	require.True(t, deleted.Delete)
+}
+
+func TestPublisherPrepareCrossRepositoryPRWithGitURLReadsAPIBase(t *testing.T) {
+	remote, privateKey := gentooGitStateRepository(t, map[string][]byte{
+		"metadata/layout.conf":                []byte("thin-manifests = true\n"),
+		"app-misc/foo-bin/foo-bin-0.5.ebuild": []byte("EAPI=8\n# target git state\n"),
+	})
+	directory := t.TempDir()
+	ebuildPath := filepath.Join(directory, "foo-bin-2.0.ebuild")
+	require.NoError(t, os.WriteFile(ebuildPath, []byte("EAPI=8\n"), 0o644))
+
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{Dist: t.TempDir()}, testctx.WithVersion("2.0"))
+	cfg := &GentooConfig{raw: config.Gentoo{
+		ID: "default", Name: "foo", Category: "app-misc", Type: "bin", ThinManifests: func() *bool { value := true; return &value }(),
+		ConflictResolution: config.ConflictResolutionOverwrite,
+		KeepVersions:       1, VersionRetentionStrategy: config.VersionRetentionStrategyKeepLatest,
+		CommitAuthor: config.CommitAuthor{Name: "Test", Email: "test@example.com"}, CommitMessageTemplate: "publish",
+		Repository: config.RepoRef{
+			Owner: "fork", Name: "overlay", Branch: "release", Git: config.GitRepoRef{URL: remote, PrivateKey: privateKey},
+			PullRequest: config.PullRequest{Enabled: true, Base: config.PullRequestBase{Owner: "upstream", Name: "overlay", Branch: "main"}},
+		},
+	}, version: "2.0"}
+	provider := &recordingRepositoryClient{Mock: client.NewMock()}
+	provider.DirFiles = map[string][]string{cfg.PackageDir(): {"foo-bin-1.0.ebuild"}}
+	provider.Files = map[string][]byte{path.Join(cfg.PackageDir(), "foo-bin-1.0.ebuild"): []byte("EAPI=8\n# API base state\n")}
+	publisher, err := NewPublisher(ctx, cfg, []GeneratedFile{{ConfigID: cfg.ID(), RepoPath: cfg.EbuildPath(), Kind: GeneratedEbuild, Path: ebuildPath}}, provider)
+	require.NoError(t, err)
+
+	changes, err := publisher.Prepare(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, provider.reads)
+	for _, repo := range provider.reads {
+		require.Equal(t, "upstream", repo.Owner)
+		require.Equal(t, "overlay", repo.Name)
+		require.Equal(t, "main", repo.Branch)
+	}
+	require.NoDirExists(t, filepath.Join(ctx.Config.Dist, "git", "overlay-main"), "target git remote must not be cloned for state")
+	deleted, ok := changes.Find("app-misc/foo-bin/foo-bin-1.0.ebuild")
+	require.True(t, ok, "API base ebuild must participate in retention")
+	require.True(t, deleted.Delete)
+	require.False(t, changes.Contains("app-misc/foo-bin/foo-bin-0.5.ebuild"), "target git state must not participate in retention")
+}
+
+func TestPublisherCrossRepositoryPRGitWriteKeepsTargetAndBaseIdentities(t *testing.T) {
+	remote, privateKey := gentooGitStateRepository(t, map[string][]byte{"README": []byte("overlay\n")})
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{Dist: t.TempDir()}, testctx.WithVersion("2.0"))
+	cfg := &GentooConfig{raw: config.Gentoo{
+		ID: "default", Name: "foo", Category: "app-misc", Type: "bin",
+		CommitAuthor: config.CommitAuthor{Name: "Test", Email: "test@example.com"}, CommitMessageTemplate: "publish",
+		Repository: config.RepoRef{
+			Owner: "fork", Name: "overlay", Branch: "release", Git: config.GitRepoRef{URL: remote, PrivateKey: privateKey},
+			PullRequest: config.PullRequest{Enabled: true, Base: config.PullRequestBase{Owner: "upstream", Name: "overlay", Branch: "main"}},
+		},
+	}, version: "2.0"}
+	provider := &recordingRepositoryClient{Mock: client.NewMock()}
+	publisher, err := NewPublisher(ctx, cfg, nil, provider)
+	require.NoError(t, err)
+
+	require.NoError(t, publisher.Write(ctx, NewChangeSet(client.RepoFile{Path: "published", Content: []byte("yes\n")})))
+	require.NoError(t, publisher.OpenPullRequest(ctx))
+	require.Equal(t, client.Repo{Owner: "upstream", Name: "overlay", Branch: "main", GitURL: remote, PrivateKey: privateKey}, provider.base)
+	require.Equal(t, client.Repo{Owner: "fork", Name: "overlay", Branch: "release", GitURL: remote, PrivateKey: privateKey}, provider.head)
+
+	clone := t.TempDir()
+	_, err = git.Clean(git.Run(t.Context(), "clone", "--branch", "release", remote, clone))
+	require.NoError(t, err)
+	content, err := os.ReadFile(filepath.Join(clone, "published"))
+	require.NoError(t, err)
+	require.Equal(t, "yes\n", string(content))
 }
 
 func TestCollectPublicationInputsInterleavedArtifacts(t *testing.T) {
