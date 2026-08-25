@@ -1849,7 +1849,7 @@ func TestGentooMetadata(t *testing.T) {
 		meta.AddUseFlags([]config.GentooUseFlag{
 			{Flag: "systemd", Description: "Enable systemd"},
 		})
-		meta.SetUpstream("https://bugs.example.com", "", nil)
+		require.NoError(t, meta.SetUpstream("https://bugs.example.com", "", nil))
 
 		content, err := meta.Marshal()
 		require.NoError(t, err)
