@@ -375,6 +375,26 @@ func TestDefaultInvalidMaintainerType(t *testing.T) {
 	require.ErrorContains(t, defaultGentooConfig(ctx, &cfg), "invalid gentoo maintainer type \"invalid\": must be person or project")
 }
 
+func TestNewGentooConfigInvalidRemoteIDs(t *testing.T) {
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
+	ctx.Version = "1.0.0"
+	cfg := config.Gentoo{
+		Upstream: config.GentooUpstream{
+			RemoteIDs: []config.GentooUpstreamRemoteID{{ID: "foo"}},
+		},
+	}
+	_, err := NewGentooConfig(ctx, cfg)
+	require.ErrorContains(t, err, "remote-id type is required for \"foo\"")
+
+	cfg = config.Gentoo{
+		Upstream: config.GentooUpstream{
+			RemoteIDs: []config.GentooUpstreamRemoteID{{Type: "github"}},
+		},
+	}
+	_, err = NewGentooConfig(ctx, cfg)
+	require.ErrorContains(t, err, "remote-id id is required for type \"github\"")
+}
+
 func TestDefaultSetsPath(t *testing.T) {
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
 		ProjectName: "foo",

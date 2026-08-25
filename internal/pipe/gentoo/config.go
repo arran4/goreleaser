@@ -106,6 +106,12 @@ func NewGentooConfig(ctx *context.Context, raw config.Gentoo) (*GentooConfig, er
 		if err := tp.ApplyAll(&raw.Upstream.RemoteIDs[i].ID, &raw.Upstream.RemoteIDs[i].Type); err != nil {
 			return nil, err
 		}
+		if raw.Upstream.RemoteIDs[i].Type == "" {
+			return nil, fmt.Errorf("remote-id type is required for %q", raw.Upstream.RemoteIDs[i].ID)
+		}
+		if raw.Upstream.RemoteIDs[i].ID == "" {
+			return nil, fmt.Errorf("remote-id id is required for type %q", raw.Upstream.RemoteIDs[i].Type)
+		}
 	}
 	if raw.Repository, err = client.TemplateRef(tp.Apply, raw.Repository); err != nil {
 		return nil, err

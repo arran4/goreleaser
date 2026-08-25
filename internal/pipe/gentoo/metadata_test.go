@@ -19,6 +19,7 @@ func TestMetadataPreservesOrderedUnknownContentWhileUpdatingManagedFields(t *tes
     <unknown maintainer-attr="kept">maintainer child</unknown>
   </maintainer>
   <!-- between elements -->
+  <doc lang="de">https://example.com/de</doc>
   <longdescription lang="en" custom="long">A long description.</longdescription>
   <use custom="use"><flag name="systemd" custom="flag">Old description</flag><unknown-use>keep</unknown-use></use>
   <upstream custom="upstream">
@@ -41,6 +42,7 @@ func TestMetadataPreservesOrderedUnknownContentWhileUpdatingManagedFields(t *tes
 		`custom="root"`, `<!-- before maintainer -->`, `<!-- between elements -->`,
 		`<maintainer type="person" custom="x">`, `<name>Alice Updated</name>`,
 		`<description>Lead maintainer</description>`, `maintainer-attr="kept"`,
+		`<doc lang="de">https://example.com/de</doc>`,
 		`<longdescription lang="en" custom="long">A long description.</longdescription>`,
 		`<use custom="use">`, `<flag name="systemd" custom="flag">Install service unit</flag>`, `<unknown-use>keep</unknown-use>`,
 		`<upstream custom="upstream">`, `<remote-id type="github">owner/repo</remote-id>`,
@@ -60,7 +62,7 @@ func TestMetadataAddsMaintainerWithoutDiscardingExistingChildren(t *testing.T) {
 	metadata, err := ParseMetadata([]byte(`<pkgmetadata><maintainer custom="x"><email>a@example.com</email><unknown>keep</unknown></maintainer></pkgmetadata>`))
 	require.NoError(t, err)
 	require.NoError(t, metadata.AddMaintainers([]config.GentooMaintainer{
-		{Email: "a@example.com", Name: "A", Type: "person"},
+		{Email: "a@example.com", Name: "A"}, // omitted defaults to person
 		{Email: "b@example.com", Name: "B", Type: "project"},
 	}))
 	content, err := metadata.Render()
@@ -69,6 +71,11 @@ func TestMetadataAddsMaintainerWithoutDiscardingExistingChildren(t *testing.T) {
 	require.Contains(t, string(content), `<maintainer custom="x" type="person">`)
 	require.Contains(t, string(content), `<maintainer type="project">`)
 	require.ElementsMatch(t, []string{"a@example.com", "b@example.com"}, metadata.MaintainerEmails())
+
+	err = metadata.AddMaintainers([]config.GentooMaintainer{
+		{Email: "invalid@example.com", Name: "Invalid", Type: "invalid"},
+	})
+	require.ErrorContains(t, err, "invalid gentoo maintainer type \"invalid\"")
 }
 
 func TestMetadataUpstreamRemoteIDs(t *testing.T) {
@@ -95,6 +102,30 @@ func TestMetadataUpstreamRemoteIDs(t *testing.T) {
 	require.Equal(t, 1, strings.Count(text, `<remote-id type="github">owner/repo</remote-id>`))
 	require.Equal(t, 1, strings.Count(text, `<remote-id type="pypi">mypackage</remote-id>`))
 	require.Equal(t, 1, strings.Count(text, `<remote-id type="gitlab">owner/repo</remote-id>`))
+}
+
+func TestMetadataUpstreamDoc(t *testing.T) {
+	metadata, err := ParseMetadata([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<pkgmetadata>
+  <upstream>
+    <doc lang="de">https://example.com/de</doc>
+  </upstream>
+</pkgmetadata>`))
+	require.NoError(t, err)
+	metadata.SetUpstream("", "https://example.com/generic", nil)
+	content, err := metadata.Render()
+	require.NoError(t, err)
+	text := string(content)
+	require.Contains(t, text, `<doc lang="de">https://example.com/de</doc>`)
+	require.Contains(t, text, `<doc>https://example.com/generic</doc>`)
+
+	metadata.SetUpstream("", "https://example.com/new", nil)
+	content, err = metadata.Render()
+	require.NoError(t, err)
+	text = string(content)
+	require.Contains(t, text, `<doc lang="de">https://example.com/de</doc>`)
+	require.Contains(t, text, `<doc>https://example.com/new</doc>`)
+	require.NotContains(t, text, `<doc>https://example.com/generic</doc>`)
 }
 
 func TestParseMetadataRejectsMalformedXML(t *testing.T) {

@@ -96,13 +96,20 @@ func (m *Metadata) AddMaintainers(maintainers []config.GentooMaintainer) error {
 		if maintainer.Email == "" {
 			return errors.New("maintainer email is required")
 		}
+		typ := maintainer.Type
+		if typ == "" {
+			typ = "person"
+		} else if typ != "person" && typ != "project" {
+			return fmt.Errorf("invalid gentoo maintainer type %q: must be person or project", typ)
+		}
+
 		node := m.maintainer(maintainer.Email)
 		if node == nil {
-			node = newMetadataElement("maintainer", xml.Attr{Name: xml.Name{Local: "type"}, Value: maintainer.Type})
+			node = newMetadataElement("maintainer", xml.Attr{Name: xml.Name{Local: "type"}, Value: typ})
 			node.children = append(node.children, metadataTextElement("email", maintainer.Email))
 			m.root.children = append(m.root.children, node)
 		} else {
-			node.setAttr("type", maintainer.Type)
+			node.setAttr("type", typ)
 		}
 		if maintainer.Name != "" {
 			node.setChildText("name", maintainer.Name)
@@ -192,7 +199,18 @@ func (m *Metadata) SetUpstream(bugsTo, doc string, remoteIDs []config.GentooUpst
 		upstream.setChildText("bugs-to", bugsTo)
 	}
 	if doc != "" {
-		upstream.setChildText("doc", doc)
+		found := false
+		for _, child := range upstream.elements("doc") {
+			if len(child.attrs) == 0 {
+				child.setText(doc)
+				found = true
+				break
+			}
+		}
+		if !found {
+			child := metadataTextElement("doc", doc)
+			upstream.children = append(upstream.children, child)
+		}
 	}
 	for _, rid := range remoteIDs {
 		if rid.Type == "" || rid.ID == "" {

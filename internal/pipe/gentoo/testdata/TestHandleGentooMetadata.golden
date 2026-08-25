@@ -4,7 +4,7 @@
 	<use>
 		<flag name="systemd">enables systemd installation</flag>
 	</use>
-	<maintainer type="">
+	<maintainer type="person">
 		<email>maintainer@example.com</email>
 		<name>Maintainer</name>
 	</maintainer>
