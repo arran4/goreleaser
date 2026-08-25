@@ -384,7 +384,7 @@ func TestNewGentooConfigInvalidRemoteIDs(t *testing.T) {
 		},
 	}
 	_, err := NewGentooConfig(ctx, cfg)
-	require.ErrorContains(t, err, "remote-id type is required for id \"foo\"")
+	require.ErrorContains(t, err, "upstream.remote_ids[0] is invalid: type is required for id \"foo\"")
 
 	cfg = config.Gentoo{
 		Upstream: config.GentooUpstream{
@@ -392,7 +392,7 @@ func TestNewGentooConfigInvalidRemoteIDs(t *testing.T) {
 		},
 	}
 	_, err = NewGentooConfig(ctx, cfg)
-	require.ErrorContains(t, err, "remote-id id is required for type \"github\"")
+	require.ErrorContains(t, err, "upstream.remote_ids[0] is invalid: id is required for type \"github\"")
 
 	cfg = config.Gentoo{
 		Upstream: config.GentooUpstream{
@@ -400,7 +400,7 @@ func TestNewGentooConfigInvalidRemoteIDs(t *testing.T) {
 		},
 	}
 	_, err = NewGentooConfig(ctx, cfg)
-	require.ErrorContains(t, err, "remote-id id is required for type \"github\"")
+	require.ErrorContains(t, err, "upstream.remote_ids[0] is invalid: id is required for type \"github\"")
 
 	cfg = config.Gentoo{
 		Upstream: config.GentooUpstream{
@@ -408,7 +408,7 @@ func TestNewGentooConfigInvalidRemoteIDs(t *testing.T) {
 		},
 	}
 	_, err = NewGentooConfig(ctx, cfg)
-	require.ErrorContains(t, err, "remote-id type is required for id \"foo\"")
+	require.ErrorContains(t, err, "upstream.remote_ids[0] is invalid: type is required for id \"foo\"")
 }
 
 func TestDefaultSetsPath(t *testing.T) {
@@ -587,8 +587,8 @@ func TestHandleGentooManifestAndMetadata(t *testing.T) {
 }
 
 func TestHandleGentooMetadata(t *testing.T) {
-	ctx := testctx.WrapWithCfg(t.Context(), config.Project{ProjectName: "test-project"})
-	cfg := config.Gentoo{
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{ProjectName: "test-project"}, testctx.WithVersion("1.0.0"))
+	raw := config.Gentoo{
 		Category: "app-misc",
 		Name:     "goreleaser-gentoo-smoke",
 		Homepage: "https://github.com/arran4/goreleaser-gentoo-smoke",
@@ -607,8 +607,11 @@ func TestHandleGentooMetadata(t *testing.T) {
 		},
 	}
 
+	cfg, err := NewGentooConfig(ctx, raw)
+	require.NoError(t, err)
+
 	var files []client.RepoFile
-	require.NoError(t, handleGentooManifestAndMetadata(ctx, cfg, nil, &files, nil))
+	require.NoError(t, handleGentooManifestAndMetadata(ctx, cfg.raw, nil, &files, nil))
 	require.NotEmpty(t, files)
 	golden.RequireEqual(t, files[0].Content)
 }

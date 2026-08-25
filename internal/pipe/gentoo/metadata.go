@@ -185,11 +185,33 @@ func (m *Metadata) SetLongDescription(desc string) {
 	m.root.children = append(m.root.children, node)
 }
 
+func normalizeRemoteID(rid config.GentooUpstreamRemoteID) (config.GentooUpstreamRemoteID, error) {
+	rid.Type = strings.TrimSpace(rid.Type)
+	rid.ID = strings.TrimSpace(rid.ID)
+	if rid.Type == "" {
+		return rid, fmt.Errorf("type is required for id %q", rid.ID)
+	}
+	if rid.ID == "" {
+		return rid, fmt.Errorf("id is required for type %q", rid.Type)
+	}
+	return rid, nil
+}
+
 func (m *Metadata) SetUpstream(bugsTo, doc string, remoteIDs []config.GentooUpstreamRemoteID) error {
 	m.ensureRoot()
 	if bugsTo == "" && doc == "" && len(remoteIDs) == 0 {
 		return nil
 	}
+
+	var normalizedRIDs []config.GentooUpstreamRemoteID
+	for i, rid := range remoteIDs {
+		n, err := normalizeRemoteID(rid)
+		if err != nil {
+			return fmt.Errorf("remote_ids[%d] is invalid: %w", i, err)
+		}
+		normalizedRIDs = append(normalizedRIDs, n)
+	}
+
 	upstream := m.root.firstElement("upstream")
 	if upstream == nil {
 		upstream = newMetadataElement("upstream")
@@ -212,14 +234,7 @@ func (m *Metadata) SetUpstream(bugsTo, doc string, remoteIDs []config.GentooUpst
 			upstream.children = append(upstream.children, child)
 		}
 	}
-	for _, rid := range remoteIDs {
-		if strings.TrimSpace(rid.Type) == "" {
-			return fmt.Errorf("remote-id type is required for id %q", rid.ID)
-		}
-		if strings.TrimSpace(rid.ID) == "" {
-			return fmt.Errorf("remote-id id is required for type %q", rid.Type)
-		}
-
+	for _, rid := range normalizedRIDs {
 		found := false
 		for _, child := range upstream.elements("remote-id") {
 			for _, attr := range child.attrs {

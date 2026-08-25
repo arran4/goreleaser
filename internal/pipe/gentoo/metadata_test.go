@@ -104,9 +104,20 @@ func TestMetadataUpstreamRemoteIDs(t *testing.T) {
 	require.Equal(t, 1, strings.Count(text, `<remote-id type="gitlab">owner/repo</remote-id>`))
 
 	err = metadata.SetUpstream("", "", []config.GentooUpstreamRemoteID{{ID: "foo"}})
-	require.ErrorContains(t, err, "remote-id type is required for id \"foo\"")
+	require.ErrorContains(t, err, "remote_ids[0] is invalid: type is required for id \"foo\"")
 	err = metadata.SetUpstream("", "", []config.GentooUpstreamRemoteID{{Type: "foo"}})
-	require.ErrorContains(t, err, "remote-id id is required for type \"foo\"")
+	require.ErrorContains(t, err, "remote_ids[0] is invalid: id is required for type \"foo\"")
+
+	err = metadata.SetUpstream("", "", []config.GentooUpstreamRemoteID{{Type: "   ", ID: "foo"}})
+	require.ErrorContains(t, err, "remote_ids[0] is invalid: type is required for id \"foo\"")
+
+	err = metadata.SetUpstream("", "", []config.GentooUpstreamRemoteID{{Type: "foo", ID: "   "}})
+	require.ErrorContains(t, err, "remote_ids[0] is invalid: id is required for type \"foo\"")
+
+	// Ensure nothing was committed to the metadata node from the failed calls
+	content2, _ := metadata.Render()
+	text = string(content2)
+	require.Equal(t, 0, strings.Count(text, `<remote-id type="foo">`))
 
 	require.NoError(t, metadata.SetUpstream("", "", []config.GentooUpstreamRemoteID{
 		{Type: "github", ID: "new/repo"},
@@ -165,7 +176,17 @@ func TestMetadataLongDescription(t *testing.T) {
 }
 
 func TestMetadataIdempotency(t *testing.T) {
-	metadata := NewMetadata()
+	metadata, err := ParseMetadata([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<pkgmetadata>
+  <!-- existing comment -->
+  <longdescription lang="de">localized</longdescription>
+  <unknown-element />
+  <upstream>
+    <doc lang="de">docs-de</doc>
+    <remote-id type="github">existing/repo</remote-id>
+  </upstream>
+</pkgmetadata>`))
+	require.NoError(t, err)
 	metadata.SetLongDescription("long")
 	require.NoError(t, metadata.AddMaintainers([]config.GentooMaintainer{
 		{Email: "a@example.com", Name: "A", Type: "person"},
