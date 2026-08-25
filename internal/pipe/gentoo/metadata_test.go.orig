@@ -33,7 +33,7 @@ func TestMetadataPreservesOrderedUnknownContentWhileUpdatingManagedFields(t *tes
 	require.NoError(t, metadata.AddMaintainers([]config.GentooMaintainer{{Email: "alice@example.com", Name: "Alice Updated", Type: "person"}}))
 	metadata.AddUseFlags([]config.GentooUseFlag{{Flag: "systemd", Description: "Install service unit"}})
 	metadata.SetLongDescription("New long desc.")
-	require.NoError(t, metadata.SetUpstream("https://bugs.example.com", "https://docs.example.com", []config.GentooUpstreamRemoteID{{Type: "pypi", ID: "mypackage"}}))
+	metadata.SetUpstream("https://bugs.example.com", "https://docs.example.com", []config.GentooUpstreamRemoteID{{Type: "pypi", ID: "mypackage"}})
 
 	output, err := metadata.Render()
 	require.NoError(t, err)
@@ -80,11 +80,11 @@ func TestMetadataAddsMaintainerWithoutDiscardingExistingChildren(t *testing.T) {
 
 func TestMetadataUpstreamRemoteIDs(t *testing.T) {
 	metadata := NewMetadata()
-	require.NoError(t, metadata.SetUpstream("", "", []config.GentooUpstreamRemoteID{
+	metadata.SetUpstream("", "", []config.GentooUpstreamRemoteID{
 		{Type: "github", ID: "owner/repo"},
 		{Type: "github", ID: "owner/repo"}, // duplicate should be ignored
 		{Type: "pypi", ID: "mypackage"},
-	}))
+	})
 	content, err := metadata.Render()
 	require.NoError(t, err)
 	text := string(content)
@@ -92,28 +92,16 @@ func TestMetadataUpstreamRemoteIDs(t *testing.T) {
 	require.Equal(t, 1, strings.Count(text, `<remote-id type="pypi">mypackage</remote-id>`))
 
 	// Add another existing
-	require.NoError(t, metadata.SetUpstream("", "", []config.GentooUpstreamRemoteID{
+	metadata.SetUpstream("", "", []config.GentooUpstreamRemoteID{
 		{Type: "github", ID: "owner/repo"},
 		{Type: "gitlab", ID: "owner/repo"},
-	}))
+	})
 	content, err = metadata.Render()
 	require.NoError(t, err)
 	text = string(content)
 	require.Equal(t, 1, strings.Count(text, `<remote-id type="github">owner/repo</remote-id>`))
 	require.Equal(t, 1, strings.Count(text, `<remote-id type="pypi">mypackage</remote-id>`))
 	require.Equal(t, 1, strings.Count(text, `<remote-id type="gitlab">owner/repo</remote-id>`))
-
-	err = metadata.SetUpstream("", "", []config.GentooUpstreamRemoteID{{ID: "foo"}})
-	require.ErrorContains(t, err, "remote-id type is required for id \"foo\"")
-	err = metadata.SetUpstream("", "", []config.GentooUpstreamRemoteID{{Type: "foo"}})
-	require.ErrorContains(t, err, "remote-id id is required for type \"foo\"")
-
-	require.NoError(t, metadata.SetUpstream("", "", []config.GentooUpstreamRemoteID{
-		{Type: "github", ID: "new/repo"},
-	}))
-	content, _ = metadata.Render()
-	require.Equal(t, 1, strings.Count(string(content), `<remote-id type="github">new/repo</remote-id>`))
-	require.Equal(t, 1, strings.Count(string(content), `<remote-id type="github">owner/repo</remote-id>`))
 }
 
 func TestMetadataUpstreamDoc(t *testing.T) {
@@ -121,73 +109,23 @@ func TestMetadataUpstreamDoc(t *testing.T) {
 <pkgmetadata>
   <upstream>
     <doc lang="de">https://example.com/de</doc>
-    <doc lang="fr">https://example.com/fr</doc>
   </upstream>
 </pkgmetadata>`))
 	require.NoError(t, err)
-	require.NoError(t, metadata.SetUpstream("", "https://example.com/generic", nil))
+	metadata.SetUpstream("", "https://example.com/generic", nil)
 	content, err := metadata.Render()
 	require.NoError(t, err)
 	text := string(content)
 	require.Contains(t, text, `<doc lang="de">https://example.com/de</doc>`)
-	require.Contains(t, text, `<doc lang="fr">https://example.com/fr</doc>`)
 	require.Contains(t, text, `<doc>https://example.com/generic</doc>`)
 
-	require.NoError(t, metadata.SetUpstream("", "https://example.com/new", nil))
+	metadata.SetUpstream("", "https://example.com/new", nil)
 	content, err = metadata.Render()
 	require.NoError(t, err)
 	text = string(content)
 	require.Contains(t, text, `<doc lang="de">https://example.com/de</doc>`)
-	require.Contains(t, text, `<doc lang="fr">https://example.com/fr</doc>`)
 	require.Contains(t, text, `<doc>https://example.com/new</doc>`)
 	require.NotContains(t, text, `<doc>https://example.com/generic</doc>`)
-}
-
-func TestMetadataLongDescription(t *testing.T) {
-	metadata, err := ParseMetadata([]byte(`<?xml version="1.0" encoding="UTF-8"?>
-<pkgmetadata>
-  <longdescription>old</longdescription>
-  <longdescription lang="de">localized</longdescription>
-</pkgmetadata>`))
-	require.NoError(t, err)
-	metadata.SetLongDescription("new")
-	content, err := metadata.Render()
-	require.NoError(t, err)
-	text := string(content)
-	require.Contains(t, text, `<longdescription lang="de">localized</longdescription>`)
-	require.Contains(t, text, `<longdescription>new</longdescription>`)
-	require.NotContains(t, text, `<longdescription>old</longdescription>`)
-
-	// Ensure no duplicate unqualified nodes are added
-	require.Equal(t, 1, strings.Count(text, `<longdescription>`))
-	// 1 open tag without attributes + 2 close tags (one for localized, one for unqualified)
-	require.Equal(t, 2, strings.Count(text, `</longdescription>`))
-}
-
-func TestMetadataIdempotency(t *testing.T) {
-	metadata := NewMetadata()
-	metadata.SetLongDescription("long")
-	require.NoError(t, metadata.AddMaintainers([]config.GentooMaintainer{
-		{Email: "a@example.com", Name: "A", Type: "person"},
-	}))
-	require.NoError(t, metadata.SetUpstream("bugs", "docs", []config.GentooUpstreamRemoteID{
-		{Type: "github", ID: "owner/repo"},
-	}))
-	content, err := metadata.Render()
-	require.NoError(t, err)
-
-	parsed, err := ParseMetadata(content)
-	require.NoError(t, err)
-	parsed.SetLongDescription("long")
-	require.NoError(t, parsed.AddMaintainers([]config.GentooMaintainer{
-		{Email: "a@example.com", Name: "A", Type: "person"},
-	}))
-	require.NoError(t, parsed.SetUpstream("bugs", "docs", []config.GentooUpstreamRemoteID{
-		{Type: "github", ID: "owner/repo"},
-	}))
-	content2, err := parsed.Render()
-	require.NoError(t, err)
-	require.Equal(t, string(content), string(content2))
 }
 
 func TestParseMetadataRejectsMalformedXML(t *testing.T) {

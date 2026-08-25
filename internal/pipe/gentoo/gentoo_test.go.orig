@@ -587,7 +587,7 @@ func TestHandleGentooManifestAndMetadata(t *testing.T) {
 }
 
 func TestHandleGentooMetadata(t *testing.T) {
-	ctx := testctx.WrapWithCfg(t.Context(), config.Project{ProjectName: "test-project"})
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
 	cfg := config.Gentoo{
 		Category: "app-misc",
 		Name:     "goreleaser-gentoo-smoke",

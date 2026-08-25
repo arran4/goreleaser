@@ -185,10 +185,10 @@ func (m *Metadata) SetLongDescription(desc string) {
 	m.root.children = append(m.root.children, node)
 }
 
-func (m *Metadata) SetUpstream(bugsTo, doc string, remoteIDs []config.GentooUpstreamRemoteID) {
+func (m *Metadata) SetUpstream(bugsTo, doc string, remoteIDs []config.GentooUpstreamRemoteID) error {
 	m.ensureRoot()
 	if bugsTo == "" && doc == "" && len(remoteIDs) == 0 {
-		return
+		return nil
 	}
 	upstream := m.root.firstElement("upstream")
 	if upstream == nil {
@@ -213,8 +213,11 @@ func (m *Metadata) SetUpstream(bugsTo, doc string, remoteIDs []config.GentooUpst
 		}
 	}
 	for _, rid := range remoteIDs {
-		if rid.Type == "" || rid.ID == "" {
-			continue
+		if strings.TrimSpace(rid.Type) == "" {
+			return fmt.Errorf("remote-id type is required for id %q", rid.ID)
+		}
+		if strings.TrimSpace(rid.ID) == "" {
+			return fmt.Errorf("remote-id id is required for type %q", rid.Type)
 		}
 
 		found := false
@@ -233,6 +236,7 @@ func (m *Metadata) SetUpstream(bugsTo, doc string, remoteIDs []config.GentooUpst
 			upstream.children = append(upstream.children, child)
 		}
 	}
+	return nil
 }
 
 func (m *Metadata) Render() ([]byte, error) {
@@ -428,7 +432,9 @@ func prepareMetadata(state *Metadata, cfg metadataConfig, changes *ChangeSet, pa
 		return err
 	}
 	state.SetLongDescription(cfg.longDescription)
-	state.SetUpstream(cfg.upstream.BugsTo, cfg.upstream.Doc, cfg.upstream.RemoteIDs)
+	if err := state.SetUpstream(cfg.upstream.BugsTo, cfg.upstream.Doc, cfg.upstream.RemoteIDs); err != nil {
+		return err
+	}
 	content, err := state.Render()
 	if err != nil {
 		return err
