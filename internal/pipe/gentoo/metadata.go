@@ -98,9 +98,11 @@ func (m *Metadata) AddMaintainers(maintainers []config.GentooMaintainer) error {
 		}
 		node := m.maintainer(maintainer.Email)
 		if node == nil {
-			node = newMetadataElement("maintainer", xml.Attr{Name: xml.Name{Local: "type"}, Value: "person"})
+			node = newMetadataElement("maintainer", xml.Attr{Name: xml.Name{Local: "type"}, Value: maintainer.Type})
 			node.children = append(node.children, metadataTextElement("email", maintainer.Email))
 			m.root.children = append(m.root.children, node)
+		} else {
+			node.setAttr("type", maintainer.Type)
 		}
 		if maintainer.Name != "" {
 			node.setChildText("name", maintainer.Name)
@@ -161,9 +163,24 @@ func (m *Metadata) AddUseFlags(flags []config.GentooUseFlag) {
 	}
 }
 
-func (m *Metadata) SetUpstream(bugsTo string) {
+func (m *Metadata) SetLongDescription(desc string) {
 	m.ensureRoot()
-	if bugsTo == "" {
+	if desc == "" {
+		return
+	}
+	for _, child := range m.root.elements("longdescription") {
+		if len(child.attrs) == 0 {
+			child.setText(desc)
+			return
+		}
+	}
+	node := metadataTextElement("longdescription", desc)
+	m.root.children = append(m.root.children, node)
+}
+
+func (m *Metadata) SetUpstream(bugsTo, doc string, remoteIDs []config.GentooUpstreamRemoteID) {
+	m.ensureRoot()
+	if bugsTo == "" && doc == "" && len(remoteIDs) == 0 {
 		return
 	}
 	upstream := m.root.firstElement("upstream")
@@ -171,7 +188,33 @@ func (m *Metadata) SetUpstream(bugsTo string) {
 		upstream = newMetadataElement("upstream")
 		m.root.children = append(m.root.children, upstream)
 	}
-	upstream.setChildText("bugs-to", bugsTo)
+	if bugsTo != "" {
+		upstream.setChildText("bugs-to", bugsTo)
+	}
+	if doc != "" {
+		upstream.setChildText("doc", doc)
+	}
+	for _, rid := range remoteIDs {
+		if rid.Type == "" || rid.ID == "" {
+			continue
+		}
+
+		found := false
+		for _, child := range upstream.elements("remote-id") {
+			for _, attr := range child.attrs {
+				if attr.Name.Local == "type" && attr.Value == rid.Type && child.textContent() == rid.ID {
+					found = true
+					break
+				}
+			}
+		}
+
+		if !found {
+			child := metadataTextElement("remote-id", rid.ID)
+			child.setAttr("type", rid.Type)
+			upstream.children = append(upstream.children, child)
+		}
+	}
 }
 
 func (m *Metadata) Render() ([]byte, error) {
@@ -226,6 +269,16 @@ func metadataTextElement(name, value string) *metadataNode {
 	node := newMetadataElement(name)
 	node.setText(value)
 	return node
+}
+
+func (n *metadataNode) setAttr(name, value string) {
+	for i, attr := range n.attrs {
+		if attr.Name.Local == name {
+			n.attrs[i].Value = value
+			return
+		}
+	}
+	n.attrs = append(n.attrs, xml.Attr{Name: xml.Name{Local: name}, Value: value})
 }
 
 func (n *metadataNode) elements(name string) []*metadataNode {
@@ -349,14 +402,15 @@ func (l Layout) WithConfig(cfg manifestConfig) Layout {
 }
 
 func prepareMetadata(state *Metadata, cfg metadataConfig, changes *ChangeSet, path string) error {
-	if len(cfg.maintainers) == 0 && len(cfg.useFlags) == 0 && cfg.bugsTo == "" {
+	if cfg.Empty() {
 		return nil
 	}
 	state.AddUseFlags(cfg.useFlags)
 	if err := state.AddMaintainers(cfg.maintainers); err != nil {
 		return err
 	}
-	state.SetUpstream(cfg.bugsTo)
+	state.SetLongDescription(cfg.longDescription)
+	state.SetUpstream(cfg.upstream.BugsTo, cfg.upstream.Doc, cfg.upstream.RemoteIDs)
 	content, err := state.Render()
 	if err != nil {
 		return err

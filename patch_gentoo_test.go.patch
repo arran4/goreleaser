@@ -1,0 +1,18 @@
+--- internal/pipe/gentoo/gentoo_test.go
++++ internal/pipe/gentoo/gentoo_test.go
+@@ -547,6 +547,15 @@
+			Flag:        "systemd",
+			Description: "enables systemd installation",
+		}},
++		Maintainers: []config.GentooMaintainer{
++			{Name: "Maintainer", Email: "maintainer@example.com"},
++		},
++		LongDescription: "This is a long description",
++		Upstream: config.GentooUpstream{
++			BugsTo: "https://github.com/goreleaser/goreleaser/issues",
++			Doc:    "https://goreleaser.com",
++			RemoteIDs: []config.GentooUpstreamRemoteID{{Type: "github", ID: "goreleaser/goreleaser"}},
++		},
+	}
+
+	var files []client.RepoFile

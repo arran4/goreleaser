@@ -365,9 +365,8 @@ func TestDefaultRequiresBin(t *testing.T) {
 func TestDefaultInvalidMaintainerType(t *testing.T) {
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
 	cfg := config.Gentoo{
-		Bin:         true,
-		License:     "MIT",
-		Description: "A description",
+		Bin: true,
+		License: "MIT",
 		Maintainers: []config.GentooMaintainer{
 			{Name: "Foo", Email: "foo@example.com", Type: "invalid"},
 		},

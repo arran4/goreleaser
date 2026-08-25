@@ -1,0 +1,10 @@
+--- internal/pipe/gentoo/gentoo_test.go
++++ internal/pipe/gentoo/gentoo_test.go
+@@ -367,6 +367,7 @@
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
+	cfg := config.Gentoo{
+		Bin: true,
++		License: "MIT",
+		Maintainers: []config.GentooMaintainer{
+			{Name: "Foo", Email: "foo@example.com", Type: "invalid"},
+		},

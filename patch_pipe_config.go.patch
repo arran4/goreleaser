@@ -1,0 +1,38 @@
+--- internal/pipe/gentoo/config.go
++++ internal/pipe/gentoo/config.go
+@@ -39,12 +39,14 @@
+
+ type metadataConfig struct {
+	maintainers []config.GentooMaintainer
+	useFlags    []config.GentooUseFlag
+-	bugsTo      string
++	longDescription string
++	upstream        config.GentooUpstream
+ }
+
+ func (c metadataConfig) Empty() bool {
+-	return len(c.maintainers) == 0 && len(c.useFlags) == 0 && c.bugsTo == ""
++	return len(c.maintainers) == 0 && len(c.useFlags) == 0 && c.longDescription == "" &&
++		c.upstream.BugsTo == "" && c.upstream.Doc == "" && len(c.upstream.RemoteIDs) == 0
+ }
+
+ type manifestConfig struct {
+@@ -276,10 +278,17 @@
+ }
+
+ func (c *GentooConfig) metadata() metadataConfig {
++	bugsTo := c.raw.BugsTo
++	if bugsTo == "" {
++		bugsTo = c.raw.Upstream.BugsTo
++	}
++	upstream := config.GentooUpstream{BugsTo: bugsTo, Doc: c.raw.Upstream.Doc, RemoteIDs: slices.Clone(c.raw.Upstream.RemoteIDs)}
+	return metadataConfig{
+-		maintainers: slices.Clone(c.raw.Maintainers),
+-		useFlags:    slices.Clone(c.raw.UseFlags),
+-		bugsTo:      c.raw.BugsTo,
++		maintainers:     slices.Clone(c.raw.Maintainers),
++		useFlags:        slices.Clone(c.raw.UseFlags),
++		longDescription: c.raw.LongDescription,
++		upstream:        upstream,
+	}
+ }
