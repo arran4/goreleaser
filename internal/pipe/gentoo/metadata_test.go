@@ -154,6 +154,27 @@ func TestMetadataUpstreamDoc(t *testing.T) {
 	require.NotContains(t, text, `<doc>https://example.com/generic</doc>`)
 }
 
+func TestMetadataSetUpstreamAtomicity(t *testing.T) {
+	original := `<?xml version="1.0" encoding="UTF-8"?>
+<pkgmetadata>
+  <upstream custom="keep">
+    <bugs-to>old-bugs</bugs-to>
+    <doc>old-doc</doc>
+    <doc lang="de">old-localized-doc</doc>
+    <remote-id type="github">existing/repo</remote-id>
+    <unknown>keep-me</unknown>
+  </upstream>
+</pkgmetadata>`
+	metadata, err := ParseMetadata([]byte(original))
+	require.NoError(t, err)
+	renderedOriginal, _ := metadata.Render()
+
+	err = metadata.SetUpstream("new-bugs", "new-doc", []config.GentooUpstreamRemoteID{{Type: "github", ID: "valid/repo"}, {Type: "   ", ID: "invalid"}})
+	require.ErrorContains(t, err, "remote_ids[1] is invalid: type is required for id \"invalid\"")
+	content, _ := metadata.Render()
+	require.Equal(t, string(renderedOriginal), string(content))
+}
+
 func TestMetadataLongDescription(t *testing.T) {
 	metadata, err := ParseMetadata([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 <pkgmetadata>

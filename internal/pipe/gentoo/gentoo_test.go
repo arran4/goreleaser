@@ -601,9 +601,9 @@ func TestHandleGentooMetadata(t *testing.T) {
 		},
 		LongDescription: "This is a {{.ProjectName}} long description",
 		Upstream: config.GentooUpstream{
-			BugsTo:    "https://github.com/goreleaser/goreleaser/issues",
-			Doc:       "https://goreleaser.com",
-			RemoteIDs: []config.GentooUpstreamRemoteID{{Type: "github", ID: "goreleaser/{{.ProjectName}}"}},
+			BugsTo:    "https://github.com/goreleaser/{{.ProjectName}}/issues",
+			Doc:       "https://{{.ProjectName}}.com",
+			RemoteIDs: []config.GentooUpstreamRemoteID{{Type: "github-{{.ProjectName}}", ID: "goreleaser/{{.ProjectName}}"}},
 		},
 	}
 
