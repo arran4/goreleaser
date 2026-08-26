@@ -81,9 +81,9 @@ func TestMetadataAddsMaintainerWithoutDiscardingExistingChildren(t *testing.T) {
 func TestMetadataUpstreamRemoteIDs(t *testing.T) {
 	metadata := NewMetadata()
 	require.NoError(t, metadata.SetUpstream("", "", []config.GentooUpstreamRemoteID{
-		{Type: "github", ID: "owner/repo"},
-		{Type: "github", ID: "owner/repo"}, // duplicate should be ignored
-		{Type: "pypi", ID: "mypackage"},
+		{Type: " github ", ID: " owner/repo "},
+		{Type: " github ", ID: " owner/repo "}, // duplicate should be ignored
+		{Type: " pypi ", ID: " mypackage "},
 	}))
 	content, err := metadata.Render()
 	require.NoError(t, err)
