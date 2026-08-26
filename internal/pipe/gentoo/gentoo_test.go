@@ -603,7 +603,7 @@ func TestHandleGentooMetadata(t *testing.T) {
 		Upstream: config.GentooUpstream{
 			BugsTo:    "https://github.com/goreleaser/{{.ProjectName}}/issues",
 			Doc:       "https://{{.ProjectName}}.com",
-			RemoteIDs: []config.GentooUpstreamRemoteID{{Type: "github-{{.ProjectName}}", ID: "goreleaser/{{.ProjectName}}"}},
+			RemoteIDs: []config.GentooUpstreamRemoteID{{Type: "{{ if eq .ProjectName \"test-project\" }}github{{ else }}invalid{{ end }}", ID: "goreleaser/{{.ProjectName}}"}},
 		},
 	}
 

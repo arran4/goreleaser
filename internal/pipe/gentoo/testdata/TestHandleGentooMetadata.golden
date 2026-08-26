@@ -12,6 +12,6 @@
 	<upstream>
 		<bugs-to>https://github.com/goreleaser/test-project/issues</bugs-to>
 		<doc>https://test-project.com</doc>
-		<remote-id type="github-test-project">goreleaser/test-project</remote-id>
+		<remote-id type="github">goreleaser/test-project</remote-id>
 	</upstream>
 </pkgmetadata>
