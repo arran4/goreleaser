@@ -362,6 +362,55 @@ func TestDefaultRequiresBin(t *testing.T) {
 	require.Error(t, Pipe{}.Default(ctx))
 }
 
+func TestDefaultInvalidMaintainerType(t *testing.T) {
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
+	cfg := config.Gentoo{
+		Bin:         true,
+		License:     "MIT",
+		Description: "A description",
+		Maintainers: []config.GentooMaintainer{
+			{Name: "Foo", Email: "foo@example.com", Type: "invalid"},
+		},
+	}
+	require.ErrorContains(t, defaultGentooConfig(ctx, &cfg), "invalid gentoo maintainer type \"invalid\": must be person or project")
+}
+
+func TestNewGentooConfigInvalidRemoteIDs(t *testing.T) {
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
+	ctx.Version = "1.0.0-rc1"
+	cfg := config.Gentoo{
+		Upstream: config.GentooUpstream{
+			RemoteIDs: []config.GentooUpstreamRemoteID{{ID: "foo"}},
+		},
+	}
+	_, err := NewGentooConfig(ctx, cfg)
+	require.ErrorContains(t, err, "upstream.remote_ids[0] is invalid: type is required for id \"foo\"")
+
+	cfg = config.Gentoo{
+		Upstream: config.GentooUpstream{
+			RemoteIDs: []config.GentooUpstreamRemoteID{{Type: "github"}},
+		},
+	}
+	_, err = NewGentooConfig(ctx, cfg)
+	require.ErrorContains(t, err, "upstream.remote_ids[0] is invalid: id is required for type \"github\"")
+
+	cfg = config.Gentoo{
+		Upstream: config.GentooUpstream{
+			RemoteIDs: []config.GentooUpstreamRemoteID{{Type: "github", ID: "  "}},
+		},
+	}
+	_, err = NewGentooConfig(ctx, cfg)
+	require.ErrorContains(t, err, "upstream.remote_ids[0] is invalid: id is required for type \"github\"")
+
+	cfg = config.Gentoo{
+		Upstream: config.GentooUpstream{
+			RemoteIDs: []config.GentooUpstreamRemoteID{{Type: "{{ .ProjectName }}", ID: "foo"}},
+		},
+	}
+	_, err = NewGentooConfig(ctx, cfg)
+	require.ErrorContains(t, err, "upstream.remote_ids[0] is invalid: type is required for id \"foo\"")
+}
+
 func TestDefaultSetsPath(t *testing.T) {
 	ctx := testctx.WrapWithCfg(t.Context(), config.Project{
 		ProjectName: "foo",
@@ -538,8 +587,8 @@ func TestHandleGentooManifestAndMetadata(t *testing.T) {
 }
 
 func TestHandleGentooMetadata(t *testing.T) {
-	ctx := testctx.WrapWithCfg(t.Context(), config.Project{})
-	cfg := config.Gentoo{
+	ctx := testctx.WrapWithCfg(t.Context(), config.Project{ProjectName: "test-project"}, testctx.WithVersion("1.0.0"))
+	raw := config.Gentoo{
 		Category: "app-misc",
 		Name:     "goreleaser-gentoo-smoke",
 		Homepage: "https://github.com/arran4/goreleaser-gentoo-smoke",
@@ -547,10 +596,22 @@ func TestHandleGentooMetadata(t *testing.T) {
 			Flag:        "systemd",
 			Description: "enables systemd installation",
 		}},
+		Maintainers: []config.GentooMaintainer{
+			{Name: "Maintainer", Email: "maintainer@example.com"},
+		},
+		LongDescription: "This is a {{.ProjectName}} long description",
+		Upstream: config.GentooUpstream{
+			BugsTo:    "https://github.com/goreleaser/{{.ProjectName}}/issues",
+			Doc:       "https://{{.ProjectName}}.com",
+			RemoteIDs: []config.GentooUpstreamRemoteID{{Type: "{{ if eq .ProjectName \"test-project\" }}github{{ else }}invalid{{ end }}", ID: "goreleaser/{{.ProjectName}}"}},
+		},
 	}
 
+	cfg, err := NewGentooConfig(ctx, raw)
+	require.NoError(t, err)
+
 	var files []client.RepoFile
-	require.NoError(t, handleGentooManifestAndMetadata(ctx, cfg, nil, &files, nil))
+	require.NoError(t, handleGentooManifestAndMetadata(ctx, cfg.raw, nil, &files, nil))
 	require.NotEmpty(t, files)
 	golden.RequireEqual(t, files[0].Content)
 }
@@ -1791,7 +1852,7 @@ func TestGentooMetadata(t *testing.T) {
 		meta.AddUseFlags([]config.GentooUseFlag{
 			{Flag: "systemd", Description: "Enable systemd"},
 		})
-		meta.SetUpstream("https://bugs.example.com")
+		require.NoError(t, meta.SetUpstream("https://bugs.example.com", "", nil))
 
 		content, err := meta.Marshal()
 		require.NoError(t, err)

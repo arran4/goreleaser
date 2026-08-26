@@ -4,6 +4,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/goreleaser/goreleaser/v2/internal/artifact"
@@ -330,7 +331,7 @@ func TestPublisherCrossRepositoryPRGitWriteKeepsTargetAndBaseIdentities(t *testi
 	require.NoError(t, err)
 	content, err := os.ReadFile(filepath.Join(clone, "published"))
 	require.NoError(t, err)
-	require.Equal(t, "yes\n", string(content))
+	require.Equal(t, "yes\n", strings.ReplaceAll(string(content), "\r\n", "\n"))
 }
 
 func TestCollectPublicationInputsInterleavedArtifacts(t *testing.T) {

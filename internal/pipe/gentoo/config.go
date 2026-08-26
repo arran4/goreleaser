@@ -39,13 +39,15 @@ type retentionPolicy struct {
 }
 
 type metadataConfig struct {
-	maintainers []config.GentooMaintainer
-	useFlags    []config.GentooUseFlag
-	bugsTo      string
+	maintainers     []config.GentooMaintainer
+	useFlags        []config.GentooUseFlag
+	longDescription string
+	upstream        config.GentooUpstream
 }
 
 func (c metadataConfig) Empty() bool {
-	return len(c.maintainers) == 0 && len(c.useFlags) == 0 && c.bugsTo == ""
+	return len(c.maintainers) == 0 && len(c.useFlags) == 0 && c.longDescription == "" &&
+		c.upstream.BugsTo == "" && c.upstream.Doc == "" && len(c.upstream.RemoteIDs) == 0
 }
 
 type manifestConfig struct {
@@ -96,6 +98,19 @@ func NewGentooConfig(ctx *context.Context, raw config.Gentoo) (*GentooConfig, er
 	})
 	if err := tp.ApplyAll(&raw.Name, &raw.Category, &raw.OverlayPath, &raw.Description, &raw.Homepage, &raw.BugsTo, &raw.License); err != nil {
 		return nil, err
+	}
+	if err := tp.ApplyAll(&raw.LongDescription, &raw.Upstream.BugsTo, &raw.Upstream.Doc); err != nil {
+		return nil, err
+	}
+	for i := range raw.Upstream.RemoteIDs {
+		if err := tp.ApplyAll(&raw.Upstream.RemoteIDs[i].ID, &raw.Upstream.RemoteIDs[i].Type); err != nil {
+			return nil, err
+		}
+		rid, err := normalizeRemoteID(raw.Upstream.RemoteIDs[i])
+		if err != nil {
+			return nil, fmt.Errorf("upstream.remote_ids[%d] is invalid: %w", i, err)
+		}
+		raw.Upstream.RemoteIDs[i] = rid
 	}
 	if raw.Repository, err = client.TemplateRef(tp.Apply, raw.Repository); err != nil {
 		return nil, err
@@ -277,10 +292,16 @@ func (c *GentooConfig) retention() retentionPolicy {
 }
 
 func (c *GentooConfig) metadata() metadataConfig {
+	bugsTo := c.raw.BugsTo
+	if bugsTo == "" {
+		bugsTo = c.raw.Upstream.BugsTo
+	}
+	upstream := config.GentooUpstream{BugsTo: bugsTo, Doc: c.raw.Upstream.Doc, RemoteIDs: slices.Clone(c.raw.Upstream.RemoteIDs)}
 	return metadataConfig{
-		maintainers: slices.Clone(c.raw.Maintainers),
-		useFlags:    slices.Clone(c.raw.UseFlags),
-		bugsTo:      c.raw.BugsTo,
+		maintainers:     slices.Clone(c.raw.Maintainers),
+		useFlags:        slices.Clone(c.raw.UseFlags),
+		longDescription: c.raw.LongDescription,
+		upstream:        upstream,
 	}
 }
 

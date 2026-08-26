@@ -96,11 +96,20 @@ func (m *Metadata) AddMaintainers(maintainers []config.GentooMaintainer) error {
 		if maintainer.Email == "" {
 			return errors.New("maintainer email is required")
 		}
+		typ := maintainer.Type
+		if typ == "" {
+			typ = "person"
+		} else if typ != "person" && typ != "project" {
+			return fmt.Errorf("invalid gentoo maintainer type %q: must be person or project", typ)
+		}
+
 		node := m.maintainer(maintainer.Email)
 		if node == nil {
-			node = newMetadataElement("maintainer", xml.Attr{Name: xml.Name{Local: "type"}, Value: "person"})
+			node = newMetadataElement("maintainer", xml.Attr{Name: xml.Name{Local: "type"}, Value: typ})
 			node.children = append(node.children, metadataTextElement("email", maintainer.Email))
 			m.root.children = append(m.root.children, node)
+		} else {
+			node.setAttr("type", typ)
 		}
 		if maintainer.Name != "" {
 			node.setChildText("name", maintainer.Name)
@@ -161,17 +170,88 @@ func (m *Metadata) AddUseFlags(flags []config.GentooUseFlag) {
 	}
 }
 
-func (m *Metadata) SetUpstream(bugsTo string) {
+func (m *Metadata) SetLongDescription(desc string) {
 	m.ensureRoot()
-	if bugsTo == "" {
+	if desc == "" {
 		return
 	}
+	for _, child := range m.root.elements("longdescription") {
+		if len(child.attrs) == 0 {
+			child.setText(desc)
+			return
+		}
+	}
+	node := metadataTextElement("longdescription", desc)
+	m.root.children = append(m.root.children, node)
+}
+
+func normalizeRemoteID(rid config.GentooUpstreamRemoteID) (config.GentooUpstreamRemoteID, error) {
+	rid.Type = strings.TrimSpace(rid.Type)
+	rid.ID = strings.TrimSpace(rid.ID)
+	if rid.Type == "" {
+		return rid, fmt.Errorf("type is required for id %q", rid.ID)
+	}
+	if rid.ID == "" {
+		return rid, fmt.Errorf("id is required for type %q", rid.Type)
+	}
+	return rid, nil
+}
+
+func (m *Metadata) SetUpstream(bugsTo, doc string, remoteIDs []config.GentooUpstreamRemoteID) error {
+	m.ensureRoot()
+	if bugsTo == "" && doc == "" && len(remoteIDs) == 0 {
+		return nil
+	}
+
+	var normalizedRIDs []config.GentooUpstreamRemoteID
+	for i, rid := range remoteIDs {
+		n, err := normalizeRemoteID(rid)
+		if err != nil {
+			return fmt.Errorf("remote_ids[%d] is invalid: %w", i, err)
+		}
+		normalizedRIDs = append(normalizedRIDs, n)
+	}
+
 	upstream := m.root.firstElement("upstream")
 	if upstream == nil {
 		upstream = newMetadataElement("upstream")
 		m.root.children = append(m.root.children, upstream)
 	}
-	upstream.setChildText("bugs-to", bugsTo)
+	if bugsTo != "" {
+		upstream.setChildText("bugs-to", bugsTo)
+	}
+	if doc != "" {
+		found := false
+		for _, child := range upstream.elements("doc") {
+			if len(child.attrs) == 0 {
+				child.setText(doc)
+				found = true
+				break
+			}
+		}
+		if !found {
+			child := metadataTextElement("doc", doc)
+			upstream.children = append(upstream.children, child)
+		}
+	}
+	for _, rid := range normalizedRIDs {
+		found := false
+		for _, child := range upstream.elements("remote-id") {
+			for _, attr := range child.attrs {
+				if attr.Name.Local == "type" && attr.Value == rid.Type && child.textContent() == rid.ID {
+					found = true
+					break
+				}
+			}
+		}
+
+		if !found {
+			child := metadataTextElement("remote-id", rid.ID)
+			child.setAttr("type", rid.Type)
+			upstream.children = append(upstream.children, child)
+		}
+	}
+	return nil
 }
 
 func (m *Metadata) Render() ([]byte, error) {
@@ -226,6 +306,16 @@ func metadataTextElement(name, value string) *metadataNode {
 	node := newMetadataElement(name)
 	node.setText(value)
 	return node
+}
+
+func (n *metadataNode) setAttr(name, value string) {
+	for i, attr := range n.attrs {
+		if attr.Name.Local == name {
+			n.attrs[i].Value = value
+			return
+		}
+	}
+	n.attrs = append(n.attrs, xml.Attr{Name: xml.Name{Local: name}, Value: value})
 }
 
 func (n *metadataNode) elements(name string) []*metadataNode {
@@ -349,14 +439,17 @@ func (l Layout) WithConfig(cfg manifestConfig) Layout {
 }
 
 func prepareMetadata(state *Metadata, cfg metadataConfig, changes *ChangeSet, path string) error {
-	if len(cfg.maintainers) == 0 && len(cfg.useFlags) == 0 && cfg.bugsTo == "" {
+	if cfg.Empty() {
 		return nil
 	}
 	state.AddUseFlags(cfg.useFlags)
 	if err := state.AddMaintainers(cfg.maintainers); err != nil {
 		return err
 	}
-	state.SetUpstream(cfg.bugsTo)
+	state.SetLongDescription(cfg.longDescription)
+	if err := state.SetUpstream(cfg.upstream.BugsTo, cfg.upstream.Doc, cfg.upstream.RemoteIDs); err != nil {
+		return err
+	}
 	content, err := state.Render()
 	if err != nil {
 		return err

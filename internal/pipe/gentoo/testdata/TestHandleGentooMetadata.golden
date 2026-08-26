@@ -4,4 +4,14 @@
 	<use>
 		<flag name="systemd">enables systemd installation</flag>
 	</use>
+	<maintainer type="person">
+		<email>maintainer@example.com</email>
+		<name>Maintainer</name>
+	</maintainer>
+	<longdescription>This is a test-project long description</longdescription>
+	<upstream>
+		<bugs-to>https://github.com/goreleaser/test-project/issues</bugs-to>
+		<doc>https://test-project.com</doc>
+		<remote-id type="github">goreleaser/test-project</remote-id>
+	</upstream>
 </pkgmetadata>

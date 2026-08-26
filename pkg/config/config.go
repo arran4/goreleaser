@@ -500,6 +500,8 @@ type Gentoo struct {
 	ExtraInstall             string                   `yaml:"extra_install,omitempty" json:"extra_install,omitempty"`
 	Maintainers              []GentooMaintainer       `yaml:"maintainers,omitempty" json:"maintainers,omitempty"`
 	BugsTo                   string                   `yaml:"bugs_to,omitempty" json:"bugs_to,omitempty"`
+	Upstream                 GentooUpstream           `yaml:"upstream,omitempty" json:"upstream,omitempty"`
+	LongDescription          string                   `yaml:"long_description,omitempty" json:"long_description,omitempty"`
 	UseFlags                 []GentooUseFlag          `yaml:"useflags,omitempty" json:"useflags,omitempty"`
 	Dobin                    []GentooInstallItem      `yaml:"dobin,omitempty" json:"dobin,omitempty"`
 	Doconfd                  []GentooInstallItem      `yaml:"doconfd,omitempty" json:"doconfd,omitempty"`
@@ -530,9 +532,21 @@ type GentooInstallItem struct {
 	Archs []string `yaml:"archs,omitempty" json:"archs,omitempty"`
 }
 
+type GentooUpstream struct {
+	BugsTo    string                   `yaml:"bugs_to,omitempty" json:"bugs_to,omitempty"`
+	Doc       string                   `yaml:"doc,omitempty" json:"doc,omitempty"`
+	RemoteIDs []GentooUpstreamRemoteID `yaml:"remote_ids,omitempty" json:"remote_ids,omitempty"`
+}
+
+type GentooUpstreamRemoteID struct {
+	Type string `yaml:"type,omitempty" json:"type,omitempty"`
+	ID   string `yaml:"id,omitempty" json:"id,omitempty"`
+}
+
 type GentooMaintainer struct {
 	Name  string `yaml:"name,omitempty" json:"name,omitempty"`
 	Email string `yaml:"email,omitempty" json:"email,omitempty"`
+	Type  string `yaml:"type,omitempty" json:"type,omitempty" jsonschema:"enum=person,enum=project,default=person"`
 }
 
 // CommitAuthor is the author of a Git commit.
